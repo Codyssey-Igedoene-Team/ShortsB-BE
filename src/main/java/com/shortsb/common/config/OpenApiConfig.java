@@ -26,7 +26,7 @@ public class OpenApiConfig {
     @Bean
     OpenAPI shortsbOpenApi() {
         return new OpenAPI()
-                .info(new Info().title("ShortSB API").version("R2")
+                .info(new Info().title("ShortSB API").version("R4")
                         .description("""
                                 ## 로컬 인증 테스트 순서
 
@@ -49,7 +49,23 @@ public class OpenApiConfig {
                                 요청 예시 네 가지로 카드만·프롬프트만·둘 다·ANY 단독 경로를 확인할 수 있습니다.
                                 생성 응답의 previewId는 발췌 재조회에, book.bookId는 도서 정보 조회에 사용합니다.
                                 실제 데이터 등록과 작품 권한 승인이 먼저 필요합니다. 벡터 검색은 본문/카드 벡터 등록이 필요하고,
-                                프롬프트 입력은 FastAPI GPU 연결도 필요합니다. 대비·전체 독서 API는 아직 제공하지 않습니다.
+                                프롬프트 입력은 FastAPI GPU 연결도 필요합니다.
+
+                                ## 대비 발췌 사용 순서
+
+                                첫 추천의 previewId와 현재 CSRF 토큰을 **대비 발췌 → 대비 작품 발췌 추천**에 입력하세요.
+                                CSV 후보뿐 아니라 양쪽 작품 승인과 실제 근거 검수가 필요합니다.
+                                200·available=false는 적합한 승인 관계가 없는 정상 결과입니다. 모델/본문 준비 오류 503과 구분합니다.
+                                성공하면 contrast.book.bookId, 첫 작품이면 기존 book.bookId를 전체 독서 시작에 사용하세요.
+
+                                ## 전체 독서 사용 순서
+
+                                **전체 독서 → 시작**에서 bookId를 문자열로 입력하고 sessionId·version을 확인하세요.
+                                페이지 조회 후 위치 저장에 pageNo·position·version·status를 전달합니다. position은 UTF-16 기준입니다.
+                                중단 시 status를 paused로 저장하고, 최근 미완료 조회에서 이어 읽을 현재 위치를 확인합니다.
+                                마지막 페이지 끝을 저장한 뒤 완료 요청에 최신 version을 전달하세요.
+                                409 응답의 current를 반영하며 과거 요청의 version만 바꿔 자동 재전송하지 않습니다.
+                                전체 독서 SQL 적용과 승인 도서 등록이 먼저 필요합니다. GPU 연결은 독서 API에 필요하지 않습니다.
                                 """))
                 // Security의 LogoutFilter가 실행하는 로그아웃 경로의 문서 등록
                 .path("/api/logout", new PathItem().post(new Operation()

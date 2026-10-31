@@ -14,12 +14,15 @@ import com.shortsb.recommendation.repository.RecommendationRepository;
 import com.shortsb.recommendation.repository.RecommendationRepository.Candidate;
 import com.shortsb.recommendation.repository.RecommendationRepository.SearchData;
 import com.shortsb.recommendation.service.PreviewService;
+
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+
+import static com.shortsb.recommendation.service.VectorSimilarity.cosine;
 
 @Service
 // 입력별 추천 경로·유사도 점수·연속 발췌 범위 계산
@@ -112,27 +115,6 @@ public class PreviewServiceImpl implements PreviewService {
         };
         return new Selection(data.books().get(best.bookId()), best.pageNo(), data.model().fingerprint(),
                 path, best.pageNo(), reason);
-    }
-
-    private double cosine(List<Double> left, List<Double> right) {
-        if (left.size() != right.size() || left.isEmpty()) {
-            throw RecommendationRepository.notReady();
-        }
-        double dot = 0;
-        double leftSquare = 0;
-        double rightSquare = 0;
-        for (int index = 0; index < left.size(); index++) {
-            double x = left.get(index);
-            double y = right.get(index);
-            dot += x * y;
-            leftSquare += x * x;
-            rightSquare += y * y;
-        }
-        double value = dot / (Math.sqrt(leftSquare) * Math.sqrt(rightSquare));
-        if (!Double.isFinite(value)) {
-            throw RecommendationRepository.notReady();
-        }
-        return Math.max(-1, Math.min(1, value));
     }
 
     private record Selection(BookData book, int pageNo, String modelFingerprint, String type,

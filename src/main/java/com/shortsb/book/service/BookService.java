@@ -9,6 +9,8 @@ public interface BookService {
 
     BookResponse getBook(long bookId);
 
+    PageResponse getPage(long bookId, int pageNo);
+
     Excerpt getExcerpt(long bookId, String contentHash, int totalPages, int startPageNo, int endPageNo);
 
     record Excerpt(BookResponse book, List<PageResponse> pages) {}

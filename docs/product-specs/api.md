@@ -1,6 +1,6 @@
 # API 명세 초안
 
-R1의 인증·본인 조회·CSRF·로그아웃 API는 사용자의 전체 검증 완료 보고를 기준으로 완료 처리했다. 개별 실행 로그는 별도로 수집하지 않았으며 운영·프런트 통합 검증은 R5에서 수행한다. 첫 추천 생성·발췌 재조회·도서 정보 API 코드를 작성했다. Spring 실행·DB/GPU 통합은 미검증이다. 대비·전체 독서 API는 아직 구현 전 제안 계약이다.
+R1의 인증·본인 조회·CSRF·로그아웃 API는 사용자의 전체 검증 완료 보고를 기준으로 완료 처리했다. 개별 실행 로그는 별도로 수집하지 않았으며 운영·프런트 통합 검증은 R5에서 수행한다. 첫 추천 생성·발췌 재조회·도서 정보·전체 독서 API 코드를 작성했다. Spring 실행·DB/GPU 통합은 미검증이다. 대비 API도 코드 작성 상태이며 실제 근거 승인·DB/GPU/API 검증은 대기 중이다.
 
 ## 공통 규칙
 
@@ -78,7 +78,7 @@ Spring의 EmbeddingService/EmbeddingServiceImpl이 FastAPI GET /health·POST /em
 
 ## 첫 추천 입력과 구현 상태
 
-아래 도서 정보·첫 발췌 생성·발췌 재조회는 코드 작성 상태이며 실행 검증 전이다. 대비·전체 독서 경로는 후속 제안이다. 신규 테스트 코드는 사용자 요청으로 작성하지 않았다.
+아래 도서 정보·첫 발췌 생성·발췌 재조회는 코드 작성 상태이며 실행 검증 전이다. 전체 독서도 아래 계약대로 코드를 작성했으며 대비 경로는 후속 제안이다. 신규 테스트 코드는 사용자 요청으로 작성하지 않았다.
 
 | 필드 | 입력 계약 |
 | --- | --- |
@@ -155,35 +155,104 @@ POST에는 로그인 쿠키와 GET /api/csrf의 실제 token을 X-CSRF-TOKEN 헤
 
 모델 설정을 읽을 수 없는 벡터 검색은 후보 판단 전에 503일 수 있다. 임베딩 연결/응답 오류는 상단 내부 임베딩 계약을 따른다. 세션 만료·로그아웃·서버 재시작 뒤에는 새 추천이 필요하며 비로그인 상태라면 필터가 먼저 401을 반환한다. 작품 권한·해시를 재조회 시 확인하며 생성 당시 본문을 세션에서 재노출하지 않는다. 입력·본문·벡터·내부 인증값은 로그나 오류에 넣지 않는다.
 
-### 대비 발췌: 구현 전
+### 대비 발췌: 코드 작성·실행 검증 대기
 
-POST /api/previews/{previewId}/contrast는 후속 제안 경로다. 첫 발췌 참조를 사용하고 완료한 전체 독서 세션을 요구하지 않는다. 기준/대상 양쪽 실제 발췌에 근거 범위가 포함된 승인 관계만 제공한다. 대비 축은 결·시선·어조·태도·결말·시대·배경 6개다. CSV 후보는 승인 근거가 아니며 정확한 근거 위치·설명을 별도로 검수한다.
+POST /api/previews/{previewId}/contrast에 같은 로그인 세션의 첫 previewId와 X-CSRF-TOKEN을 전달한다. 요청 본문은 없다. 세션 소유자·첫 작품 승인·본문 해시·실제 발췌를 검증한다. 전체 독서 세션 생성·완료를 요구하지 않는다. 성공/후보 없음 모두 200·no-store다.
 
-두 번째 작품에도 원래 requestedPageCount를 적용한다. 요청 10쪽에 첫 작품 8쪽·대비 작품 20쪽이면 각각 8쪽·10쪽이다. 유효 근거가 없으면 대비만 생략하고 첫 책 전체 독서는 허용한다. relationId·contrastAxis·commonTopic·reason·양쪽 근거 참조와 세부 실패 계약은 R4에서 구현한다.
+```json
+{"available":false,"sourcePreviewId":"첫 발췌 UUID","reasonCode":"NO_ELIGIBLE_CONTRAST","contrast":null}
+```
 
-## 전체 독서
+available=true이면 reasonCode는 null이며 contrast는 아래 필드를 갖는다.
 
-| 제안 메서드·경로 | 요청·역할 |
+| 필드 | 의미 |
 | --- | --- |
-| `POST /api/reading-sessions` | bookId로 전체 독서 시작. 신규 시작은 서버가 첫 페이지·처음 위치 설정 |
-| `GET /api/reading-sessions/current` | 기존 미완료 전체 독서 이어 읽기 |
-| `GET /api/reading-sessions/{sessionId}` | 본인 세션·전체 작품 기준 진행 조회 |
-| `GET /api/reading-sessions/{sessionId}/pages/{pageNo}` | 세션 작품의 페이지 조회 |
-| `PATCH /api/reading-sessions/{sessionId}/progress` | pageNo·position 기반 저장. 입력·필드명 최종 합의 필요 |
-| `POST /api/reading-sessions/{sessionId}/complete` | 전체 마지막 페이지 끝 도달 검증 후 전체 책 완료 |
+| relationId | 신규 대비 관계의 문자열 내부 ID |
+| contrastAxis / contrastAxisLabel | texture/결, perspective/시선, tone/어조, attitude/태도, ending/결말, setting/시대·배경 |
+| commonTopic / reason | 사람이 실제 양쪽 근거로 검수한 주제·대비 설명 |
+| requestedPageCount / actualPageCount | 첫 추천의 원래 요청량 / 대비 작품의 실제량 |
+| book | 대상 작품의 도서 정보. bookId로 전체 독서 시작 |
+| startPageNo / endPageNo | 대상 연속 발췌 범위. 1-based·끝 포함 |
+| sourceEvidence / targetEvidence | {bookId,startPageNo,endPageNo,quote}. 실제 양쪽 발췌 안의 승인 근거 |
+| pages | 대상 원본 연속 페이지 [{pageNo,content}] |
 
-- 신규 시작에서 클라이언트의 발췌 시작 페이지나 requestedPageCount를 전체 독서 범위로 사용하지 않는다. 서버가 승인된 전체 본문 범위를 결정한다.
-- 회원·책마다 미완료 세션은 하나다. 미완료 세션이 있으면 시작 요청은 기존 세션·현재 위치를 반환하고, 없거나 이전 세션이 완료됐다면 새 세션을 첫 페이지에 생성한다. 다른 책은 별도 미완료 세션을 허용한다. 동시 요청도 동일 정책을 보장하도록 처리하며 신규/재사용의 정확한 응답 상태는 최종 계약에서 고정한다.
-- 응답은 sessionId·bookId·전체 쪽수·현재 위치·전체 책 기준 진행량·상태를 표현한다. 현재 위치·최대 도달 위치·진행률·저장 버전을 구분한다. 현재 위치는 재개에, 최대 도달 위치는 감소하지 않는 진행률에 사용한다. 최대 도달 위치는 실제 모든 앞 페이지 열람 증명이 아니다. 필드명·진행률 세부 환산은 최종 계약에서 고정한다.
-- 발췌 읽기는 전체 독서 진행량에 자동 합산하지 않는다. 발췌로 짧은 작품 전체를 봐도 전체 독서 완료로 만들지 않는다.
-- 페이지 내 위치는 UTF-16 코드 단위 오프셋을 사용하는 초안이다. 실제 범위 검증과 다른 언어/인덱스의 변환을 명시한다.
-- 진행 요청의 reading/paused, 완료의 completed 방향을 유지한다. 전체 끝 미도달·상태 충돌·중복 완료의 구체적 응답은 R3에서 확정한다.
-- 진행 저장·중단·완료에는 조회 시 받은 version을 포함한다. 서버는 버전 확인과 갱신을 원자적으로 처리하고 성공 시 version을 증가시킨다. 불일치는 409와 최신 현재 위치·최대 도달 위치·상태·version을 반환한다. 과거 요청은 현재/최대 위치·상태를 변경하지 않는다. 프런트는 최신 기록을 반영하되 실패 요청의 version만 교체해 자동 재전송하지 않는다. 네트워크 재전송에도 동일 규칙을 적용한다. 409 추가 데이터의 정확한 본문 필드와 오류 코드는 계약 초안으로 정리한다.
+신규 book_contrast_relations의 승인 관계만 사용한다. 기존 book_relations·추천 로그는 변경하지 않는다. 후보 등록·근거 JSONL 계약과 SQL 적용은 [contrast-import.md](../database/contrast-import.md)를 따른다. CSV 45개 후보는 pending 양식만 생성했고 실제 의미 검수·승인은 미완료다.
+
+기준 근거 범위 전체가 첫 발췌에 포함돼야 하며, 대상 근거는 min(원래 요청,대상 전체)쪽에 담을 수 있어야 한다. 각 근거 범위는 최대 10쪽이며 정확한 구절을 지정한다. 양쪽 권한·검수 당시 본문 해시·페이지 존재를 검증한다. 선택한 구절은 원본에 실제 포함되는지 재확인한다.
+
+첫 발췌의 페이지 평균 벡터와, 대상 근거를 포함하는 연속 창의 평균 벡터를 정규화한 코사인 유사도로 정렬한다. 동점은 관계 ID·시작 페이지 오름차순이다. 대비 주장은 승인 축/설명으로 한정하며 낮은 유사도 자체로 반대 관점을 생성하지 않는다. 첫 카드를 다시 강제하지 않는다. 기존 본문 벡터를 재사용하며 FastAPI·프롬프트 재임베딩·외부 API 호출은 없다.
+
+첫 추천에 modelFingerprint가 있으면 해당 모델과 자료 버전을 유지하고 ANY 단독이면 활성 모델을 사용한다. 근거/범위 후보가 없으면 벡터 준비 상태를 조회하기 전에 available=false다. 승인 관계는 있지만 필요한 벡터/모델이 없거나 평균 벡터를 정규화할 수 없으면 503 / RECOMMENDATION_NOT_READY다. 승인 구절이 원본과 다르면 503 / CONTRAST_EVIDENCE_INVALID다. 첫 발췌 만료/다른 소유자는 404, 첫 본문 변경은 409이며 기존 발췌 오류 계약을 따른다.
+
+요청 10쪽·첫 작품 8쪽·대상 20쪽이면 대상은 10쪽이다. 근거가 2쪽인데 요청이 1쪽이면 해당 관계는 제외한다. 두 번째 previewId·세션 항목은 만들지 않고 sourcePreviewId로 연결하며, 재요청은 현재 승인 상태로 다시 계산한다. source의 bookId 또는 contrast.book.bookId로 R3 전체 독서를 시작한다. 후보가 없어도 첫 책 전체 독서는 허용한다.
+
+## 전체 독서: 코드 작성·실행 검증 대기
+
+book_reading_sessions에 책 전체 독서를 저장한다. 기존 reading_sessions·recommendation_logs는 과거 구조로 보존하며 자동 변환하지 않는다. 기존 DB는 001 적용 후 002-whole-book-reading.sql을, 빈 DB는 schema.sql만 적용한다. Codex는 적용·실행하지 않았다.
+
+| 메서드·경로 | 요청·결과 |
+| --- | --- |
+| POST /api/reading-sessions | {bookId:"1"}. 새 기록 201, 기존 미완료 기록 재사용 200. Location 포함 |
+| GET /api/reading-sessions/current | 최근 갱신 미완료 기록 하나. bookId 선택 필터. 없으면 204 |
+| GET /api/reading-sessions/{sessionId} | 본인 전체 독서 상태 |
+| GET /api/reading-sessions/{sessionId}/pages/{pageNo} | 작품 전체 중 원본 한 페이지 {pageNo,content}. 진행 저장 없음 |
+| PATCH /api/reading-sessions/{sessionId}/progress | pageNo·position·version·status로 진행/중단 저장 |
+| POST /api/reading-sessions/{sessionId}/complete | {version:"1"}. 마지막 끝 저장 후 완료 |
+
+모두 로그인·본인 회원 확인이 필요하고 변경 요청은 CSRF를 검증한다. 성공과 current를 포함한 충돌 응답은 no-store다. 요청/응답의 ID·version은 JavaScript 정밀도를 위해 문자열이며 경로/쿼리 ID는 양의 정수다. 요청 위치는 JSON 정수이며 숫자 문자열·소수를 허용하지 않는다.
+
+시작 요청:
+
+```json
+{"bookId":"1"}
+```
+
+신규 기록은 1페이지·위치 0·최대 위치 1/0·진행률 0·version "0"이다. 발췌량은 합산하지 않는다. 회원·책별 미완료 기록 하나를 재사용하며 기존 위치·reading/paused 상태·version은 시작 요청에서 변경하지 않는다. 재개 후 progress에 reading을 저장한다. 완료한 책은 새 기록을 만들고 서로 다른 책은 미완료 기록을 따로 유지한다. current는 updatedAt·sessionId 내림차순의 최신 미완료 하나다.
+
+### 응답과 진행률
+
+응답 필드는 sessionId, book, currentPageNo, currentPosition, furthestPageNo, furthestPosition, progressPercent, status, version, startedAt, updatedAt, completedAt이다. book은 도서 조회와 같은 메타데이터다. status는 reading/paused/completed이며 completedAt은 미완료면 null이다. 시각은 UTC다.
+
+위치는 페이지 내 UTF-16 단위로 0~content.length를 허용한다. 이모지 서로게이트 쌍 중간 위치는 400이다. 누적 위치는 이전 페이지 UTF-16 길이 합+현재 위치다. 전체 길이는 페이지별 본문 길이 합이며 pageJoiner는 제외한다. progressPercent=최대 누적 위치/전체 길이×100을 소수 둘째 자리까지 내림한다. 뒤로 이동하면 현재 위치만 바뀌며 최대 위치/진행률은 유지한다. 이는 건너뛴 앞 페이지를 실제로 모두 읽었다는 증명이 아니다.
+
+### 진행 저장·중단
+
+```json
+{"pageNo":1,"position":10,"version":"0","status":"reading"}
+```
+
+status를 paused로 보내면 같은 위치 계약으로 중단을 저장한다. 페이지 조회만으로 위치를 저장하지 않으므로 프런트는 페이지 이동·중단·완료 직전에 저장한다. 스크롤 저장 간격은 프런트 통합에서 조정한다. 네트워크 실패 재전송에도 기존 version을 사용한다.
+
+서버는 회원/기록 잠금·version 비교·현재/최대 위치 갱신·version 증가를 한 트랜잭션에서 처리한다. version 불일치 요청은 현재 위치·최대 위치·상태·시각을 변경하지 않는다. 같은 회원의 쓰기는 직렬화하며 부분 유일 인덱스로 중복 미완료 기록을 막는다. 갱신 시각은 잠금 대기 전 트랜잭션 시작 시각이 아닌 저장 SQL의 statement_timestamp()를 사용한다.
+
+### 완료와 재전송
+
+먼저 마지막 페이지의 position=content.length를 progress에 저장한 다음 반환된 최신 version으로 complete를 호출한다. 현재 위치가 마지막 끝이어야 하며 최대 진행률이 100%여도 현재 앞부분에 있으면 완료할 수 없다. 100% 도달과 completed 상태는 별개다.
+
+완료 성공 시 status·completedAt을 설정하고 version을 증가시킨다. 같은 최신 version으로 반복 완료하면 동일 기록을 반환하고 version·시각을 변경하지 않는다. 완료 전 과거 version으로 재전송하면 409다. 완료 기록에 progress를 보내면 최신 버전이어도 409다.
+
+### 오류와 충돌 응답
+
+| 상황 | 상태 / 코드 |
+| --- | --- |
+| 입력 형식·범위 오류 | 400 / INVALID_REQUEST |
+| 페이지 내 위치·상태·서로게이트 경계 오류 | 400 / INVALID_READING_POSITION |
+| 없는/타 회원 기록 | 404 / READING_SESSION_NOT_FOUND |
+| 미승인·미존재·페이지 미준비 작품 | 404 / BOOK_NOT_FOUND |
+| 작품 범위 밖 페이지 조회 | 404 / PAGE_NOT_FOUND |
+| 과거 저장 버전 | 409 / READING_VERSION_CONFLICT |
+| 완료 기록에 진행 저장 | 409 / READING_ALREADY_COMPLETED |
+| 현재 위치가 마지막 끝이 아닌 완료 | 409 / READING_NOT_AT_END |
+| 시작 당시 본문 해시·쪽수·길이 변경 | 409 / READING_CONTENT_CHANGED |
+| 저장 위치·길이 무결성 오류 | 503 / READING_DATA_UNAVAILABLE |
+| 실제 페이지 본문 무결성 오류 | 503 / CONTENT_UNAVAILABLE |
+
+버전/완료 상태 충돌은 {code,message,current}이며 current는 위 독서 상태 응답이다. 프런트는 최신 상태를 표시하고 과거 요청의 version만 바꿔 자동 재전송하지 않는다. 본문 변경 오류는 복원할 수 있는 새 위치가 정해지지 않았으므로 공통 {code,message}를 반환하며 기존 기록을 보존한다. 미승인 자료는 저장된 위치로도 본문을 제공하지 않는다.
 
 ## 내부 임베딩 연동과 보류
 
 - FastAPI는 본문·카드 사전 생성과 요청 프롬프트 임베딩을 담당하고 Spring은 DB·검색 점수·정책·페이지를 담당한다.
 - 내부 `GET /health`, `POST /embeddings`는 [인계 문서](../plans/fastapi-ai-handoff.md)의 제안 계약이다. 사용자 세션을 FastAPI로 전달하지 않는다.
-- KURE-v1을 사용하며 벡터는 PostgreSQL double precision[]에 저장하는 SQL·수동 등록 코드를 작성했다. 모델 revision·실제 GPU 접속은 추가 확인한다. 기본 카드/프롬프트 비중은 40%/60%이고 첫 추천 프롬프트는 UTF-16 2,000단위·모델 토큰 상한을 적용한다. 첫 추천·도서 API는 코드 작성 상태이며 실행 검증 전이다. 대비·전체 독서는 구현 전이다.
+- KURE-v1을 사용하며 벡터는 PostgreSQL double precision[]에 저장하는 SQL·수동 등록 코드를 작성했다. 모델 revision·실제 GPU 접속은 추가 확인한다. 기본 카드/프롬프트 비중은 40%/60%이고 첫 추천 프롬프트는 UTF-16 2,000단위·모델 토큰 상한을 적용한다. 첫 추천·도서 API는 코드 작성 상태이며 실행 검증 전이다. 전체 독서·대비도 코드 작성·실행 미검증이다.
 - 기본 공유·공유 카드는 무기한 보류하며 전용 API를 필수 범위에 추가하지 않는다. 성과 측정·이벤트 계약 확장도 보류한다.
-- 현재 schema.sql의 선택 범위 중심 reading_sessions·기존 user_preferences·recommendation_logs를 이 문서만으로 변경하지 않는다. 페이지·검색 구간·원본 ID·벡터 저장 변경 SQL은 별도로 작성했다. 발췌는 세션 임시 보관이며 전체 독서·CSV 대비 유형 스키마 전환은 R3/R4에서 검토한다.
+- 현재 schema.sql의 선택 범위 중심 reading_sessions·기존 user_preferences·recommendation_logs를 이 문서만으로 변경하지 않는다. 페이지·검색 구간·원본 ID·벡터 저장 변경 SQL은 별도로 작성했다. 발췌는 세션 임시 보관이며 전체 독서는 별도 book_reading_sessions로 작성했고 실제 적용은 미실행이다. R4는 별도 book_contrast_relations·003 변경 SQL을 작성했으며 실제 검수 등록은 대기 중이다.

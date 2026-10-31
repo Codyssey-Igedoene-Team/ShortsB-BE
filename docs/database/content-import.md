@@ -18,7 +18,7 @@
 
 전체 본문은 book_pages에 나누어 모두 저장한다. 페이지 사이에 page_joiner를 넣어 연결하면 원본 text를 복원할 수 있다. 전체 text 열과 검색용 본문 사본은 추가하지 않는다. source_metadata는 text/pages를 제외한 원본 필드를 보존한다. licenseURL·licenseLabel·credits의 NULL, 번역 주의사항, 0-based chapters 범위도 유지한다.
 
-기존 book_segments·reading_sessions·book_relations는 삭제·변환하지 않는다. R3/R4에서 새 페이지와 전체 독서·6개 대비 축에 맞춰 별도 변경한다. 기존 도서는 외부 ID와 등록용 필드를 NULL로 유지할 수 있지만 새 검색 경로에는 검증된 페이지·벡터가 있어야 한다.
+기존 book_segments·reading_sessions·book_relations는 삭제·변환하지 않는다. R3는 별도 book_reading_sessions로 전체 독서를 작성했고 기존 DB용은 002-whole-book-reading.sql이다. 독서 API 사용 전에 001 다음으로 적용한다. 기존 기록 자동 변환은 없다. 6개 대비 축은 R4 별도 book_contrast_relations·003 변경 SQL을 작성했다. 후보/검수 등록은 contrast-import.md를 따른다. 기존 도서는 외부 ID와 등록용 필드를 NULL로 유지할 수 있지만 새 검색 경로에는 검증된 페이지·벡터가 있어야 한다.
 
 ## SQL 적용
 

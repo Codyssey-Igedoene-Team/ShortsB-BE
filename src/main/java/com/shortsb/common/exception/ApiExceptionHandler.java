@@ -2,6 +2,8 @@ package com.shortsb.common.exception;
 
 import com.shortsb.common.dto.ApiError;
 import com.shortsb.embedding.exception.EmbeddingException;
+import com.shortsb.reading.dto.ReadingConflictResponse;
+import com.shortsb.reading.exception.ReadingConflictException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -19,6 +21,13 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    // 본인 독서 기록의 최신 상태를 포함한 충돌 응답
+    @ExceptionHandler(ReadingConflictException.class)
+    public ResponseEntity<ReadingConflictResponse> handleReadingConflict(ReadingConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).cacheControl(org.springframework.http.CacheControl.noStore())
+                .body(new ReadingConflictResponse(exception.code(), exception.getMessage(), exception.current()));
+    }
 
     // 업무 오류의 고정 코드·메시지 반환
     @ExceptionHandler(ApiException.class)

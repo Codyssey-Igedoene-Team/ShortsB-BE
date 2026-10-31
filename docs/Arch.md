@@ -5,13 +5,13 @@
 | 항목 | 구성 |
 | --- | --- |
 | 언어·서버 | Java 21, Spring Boot 4.1.2, Spring MVC |
-| 데이터 접근 | Spring Data JPA, 도서·추천·수동 등록용 JdbcTemplate, PostgreSQL 드라이버 |
+| 데이터 접근 | Spring Data JPA, 도서·추천·독서·수동 등록용 JdbcTemplate, PostgreSQL 드라이버 |
 | 보안·검증 | Spring Security, Validation |
 | 외부 HTTP 연동 | RestClient 관련 의존성 |
 | API 문서 | springdoc OpenAPI UI 3.2.0 |
 | 연동 클라이언트 | React |
 
-`com.shortsb` 아래에 R1의 `auth`·`user`·`common` 구현과 R2의 `embedding` 내부 연결 서비스와 `book` 수동 등록 기능이 있다. 사용자가 R1 전체 검증 완료를 보고하여 인증 단계를 완료 처리했다. 개별 실행 로그는 별도 수집하지 않았으며 Codex는 Spring 빌드·테스트를 실행하지 않았다. 첫 추천·발췌 재조회·승인 도서 정보 API 코드를 작성했으며 실행·DB/GPU 통합은 미검증이다. 전체 독서·대비 API는 구현 전이다.
+`com.shortsb` 아래에 R1의 `auth`·`user`·`common` 구현과 R2의 `embedding` 내부 연결 서비스와 `book` 수동 등록 기능이 있다. 사용자가 R1 전체 검증 완료를 보고하여 인증 단계를 완료 처리했다. 개별 실행 로그는 별도 수집하지 않았으며 Codex는 Spring 빌드·테스트를 실행하지 않았다. 첫 추천·발췌 재조회·승인 도서 정보 API 코드를 작성했으며 실행·DB/GPU 통합은 미검증이다. 전체 독서 API와 저장 SQL도 작성했으며 실제 실행·DB 적용은 미검증이다. 대비 API·검수 등록 코드와 SQL도 작성했으며 실제 근거 승인·실행 검증은 대기 중이다.
 
 상위 `ShortsB-AI`에는 KURE-v1 공통 encoder·FastAPI health/embeddings·도서 준비·JSONL 사전 생성·산출물 검증 도구를 작성했다. 합성 encoder를 사용한 Python/HTTP 검사 20개는 통과했으며, 이는 Spring 빌드·테스트 실행과 별개다. 15개 작품·864페이지 입력 검증을 마쳤다. 사용자 GPU의 합성 문장 임베딩은 확인했지만 새 앱의 GPU 기동·실제 도서 임베딩·Spring 통합은 미검증이다.
 
@@ -22,6 +22,7 @@
 - 도메인 내부를 역할별 하위 패키지로 나눈다. 현재 `auth`는 `config`, `controller`, `dto`, `security`, `service/impl`, `user`는 `controller`, `dto`, `entity`, `repository`, `service/impl`, `common`은 `config`, `dto`, `exception`으로 구성한다.
 - `book`은 `command`, `controller`, `dto`, `repository`, `service/impl` 구조다. CatalogImportCommand는 웹 앱과 분리된 수동 명령이며 CatalogImportReader가 파일을 검증하고 CatalogImportServiceImpl이 트랜잭션 등록을 처리한다. BookController/BookServiceImpl은 승인 도서 정보와 저장 발췌 범위의 해시·연속 페이지를 조회한다.
 - `recommendation`은 `config`, `controller`, `dto`, `repository`, `service/impl` 구조다. PreviewServiceImpl은 네 입력 경로의 유사도·무작위 선택과 발췌 범위를 계산하고 PreviewStore는 본문 없는 참조를 세션에 보관한다.
+- `reading`은 `controller`, `dto`, `exception`, `repository`, `service/impl` 구조다. ReadingServiceImpl이 전체 독서 범위·최대 위치·version을 검증하고 ReadingRepository가 book_reading_sessions를 저장한다.
 - `embedding`은 `config`, `dto`, `exception`, `service/impl` 구조다. EmbeddingServiceImpl이 전용 RestClient로 FastAPI만 호출한다. 프런트용 컨트롤러·사용자 세션 전달·DB 직접 접근은 없다.
 - 요청 흐름: Controller → Service 인터페이스 → ServiceImpl → Repository → PostgreSQL. `UserServiceImpl`은 회원 조회·생성을, `GoogleOidcUserServiceImpl`은 검증된 구글 사용자와 내부 회원의 연결을 담당한다. Controller·인증 설정은 서비스 인터페이스를 주입받는다.
 - 응답 DTO는 `dto` 패키지에 두며 회원 응답 변환은 `MeResponse.from(User)`에서 처리한다. 외부 도서 API 호출은 연동 코드로 분리한다.
@@ -101,8 +102,8 @@
 
 - 스키마 기준은 docs/database/schema.sql이다. 초기 생성용이며 기존 DB 갱신은 별도 변경 SQL이 필요하다. erd.pgerd는 자동 동기화되지 않는다.
 - books의 topics·moods·edition·language·source_url·rights_evidence와 book_relations의 양쪽 근거 구간 FK가 이미 존재한다.
-- user_preferences의 과거 취향 배열은 새 필수 카드/선택 프롬프트 계약과 다르다. reading_sessions는 선택 구간 중심이며 새 전체 독서 기준과 대조해야 한다.
-- 페이지·외부 ID·원본 출처/번역 메타데이터·검색 구간·모델·본문/카드 벡터·단일 추천 설정의 SQL과 수동 등록 코드를 작성했다. 기존 DB용 변경 SQL은 database/migrations/001-content-embeddings.sql이다. 실제 DB 적용은 미실행이며 기존 독서·대비 테이블은 R3/R4 전환까지 유지한다. 발췌 DB 테이블은 추가하지 않는다.
+- user_preferences는 과거 취향 배열이다. 기존 reading_sessions는 선택 구간 중심 과거 기록이며 신규 전체 독서에 사용하지 않는다. 전체 독서는 book_reading_sessions에 별도 저장한다.
+- 페이지·외부 ID·원본 출처/번역 메타데이터·검색 구간·모델·본문/카드 벡터·단일 추천 설정의 SQL과 수동 등록 코드를 작성했다. 기존 DB용 변경 SQL은 database/migrations/001-content-embeddings.sql이다. 실제 DB 적용은 미실행이며 기존 독서·대비 테이블은 보존하고 R3는 별도 book_reading_sessions를 사용한다. R4는 별도 book_contrast_relations·003 변경 SQL을 작성했으며 실제 검수 등록은 대기 중이다. 발췌 DB 테이블은 추가하지 않는다.
 - recommendation_logs의 성과 측정 확장은 보류한다. 공유·공유 카드는 무기한 보류이며 새 API·완료 조건에 추가하지 않는다.
 - openAPI.md는 사전 공급원 후보 자료로 수정 보류다. 요청마다 외부 전체 도서를 수집하는 기능은 이번 범위가 아니다.
 
@@ -113,4 +114,26 @@
 - 회원·책마다 미완료 전체 독서 세션 하나를 원자적으로 생성/재사용한다. 완료 후 재선택은 새 세션이며 다른 책은 별도 미완료 세션을 가질 수 있다.
 - 현재 위치·최대 도달 위치·저장 버전을 구분한다. 최신 상태의 뒤로 이동은 현재 위치만 바꾸고 최대 위치 기반 진행률은 유지한다.
 - 진행·중단·완료는 저장 버전 일치 확인과 갱신을 원자적으로 수행한다. 불일치 409에 최신 위치·상태·버전을 반환하며 거절된 요청은 최대 위치도 바꾸지 않는다. 프런트는 과거 요청 버전만 교체한 자동 재전송을 하지 않는다.
-- 원자적 생성·저장 검증, 최대 위치·버전 필드와 제약을 현재 스키마에 반영하는 작업은 후속 구현이다. 독서 위치·대비 스키마/구현은 R3/R4에서 변경하며 R2 등록 스키마와 구분한다.
+- R3에서 전체 독서 스키마·시작/조회/페이지/진행/완료 코드를 작성했다. 기존 DB용은 migrations/002-whole-book-reading.sql이며 DB 적용·실행 검증은 미완료다. 대비는 R4 별도 테이블·등록/API 코드를 작성했으나 실제 적용은 미실행이다.
+
+
+## 전체 독서 저장·동시성
+
+- 회원·책별 미완료 전체 독서는 부분 유일 인덱스로 하나만 허용한다. 신규 시작은 첫 페이지·위치 0이며 완료 후 재선택은 새 기록이다. 미완료 재사용은 상태/위치를 변경하지 않는다.
+- 쓰기 메서드는 READ COMMITTED 트랜잭션에서 회원 행 FOR UPDATE를 먼저 잠근다. 같은 회원의 동시 시작·진행·완료를 직렬화하고 기존 세션은 소유자 조건으로 행을 잠근다. 도서 FOR SHARE로 처리 중 승인/버전 메타데이터 변경을 막는다. [PostgreSQL 행 잠금](https://www.postgresql.org/docs/current/explicit-locking.html)
+- version 일치 확인과 조건부 UPDATE를 같은 트랜잭션에 둔다. 충돌은 409 {code,message,current}로 반환하고 거절된 요청은 최대 위치도 바꾸지 않는다. DB 저장 실패는 롤백한다.
+- 본문 해시·쪽수·UTF-16 전체 길이를 시작 시 저장한다. 페이지 길이만으로 누적 위치를 계산하고 실제 조회/저장 대상 페이지의 본문 해시·UTF-16 경계를 확인한다. 전체 본문을 한 번에 로딩하지 않는다.
+- 진행률은 페이지 구분자 제외 최대 누적 위치/전체 본문 길이×100이며 소수 둘째 자리까지 내림한다. 현재 위치와 최대 위치를 분리하고 100% 도달과 completed를 구분한다.
+- 최근 저장 순서에 잠금 대기 전 트랜잭션 시각이 반영되지 않도록 INSERT/UPDATE에 statement_timestamp()를 사용한다. [PostgreSQL 현재 시각](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)
+- 상세 API·완료/재전송 정책은 product-specs/api.md, 작업 현황은 plans/active/r3-whole-book-reading.md를 따른다. 테스트 코드 작성·빌드·실행·DB 적용은 하지 않았다.
+
+
+## 대비 근거와 추천
+
+- 기존 book_relations와 로그는 보존한다. book_contrast_relations는 source/target/6개 축으로 관계를 식별하고 양쪽 본문 해시·1-based 근거 범위/구절·사람 설명·검수자·상태를 저장한다.
+- scripts/prepare_contrast_reviews.py로 CSV 45개 후보의 pending 양식을 생성했다. 본문/구절을 읽거나 출력하지 않았고 검수 승인은 하지 않았다. 자료 구조/실행은 [contrast-import.md](database/contrast-import.md)를 따른다.
+- importContrasts는 웹 앱과 분리된 수동 명령이다. validate-only도 DB를 조회하며 쓰지 않는다. apply는 전체 파일을 트랜잭션으로 등록한다. pending 재등록은 기존 승인/제외를 유지하고 승인에는 양쪽 권한·해시·실제 구절 대조가 필요하다.
+- ContrastServiceImpl은 첫 발췌의 소유자 확인 후 동일 읽기 스냅샷에서 원본/관계/모델/본문 벡터를 조회한다. 근거 범위가 두 실제 발췌에 포함되는 승인 관계만 사용한다. 생성형 대비·낮은 유사도 기반 반대 주장·추가 GPU 호출은 없다.
+- 첫 발췌 평균과 대상 근거를 담는 연속 창 평균을 정규화한 코사인 점수로 정렬한다. VectorSimilarity를 첫 추천과 공유한다. 첫 모델을 유지하며 ANY 단독이면 활성 모델을 사용한다.
+- 후보/범위 없음은 200 available=false, 준비 부족은 503이다. 두 번째 previewId나 세션 항목은 생성하지 않고 sourcePreviewId로 연결한다. 응답의 양쪽 bookId로 기존 R3 전체 독서를 시작한다.
+- 003 변경 SQL·검수 파일 반영·실제 API 실행은 미완료다. 테스트 코드는 추가하지 않았으며 기존 검사 파일은 유지한다.

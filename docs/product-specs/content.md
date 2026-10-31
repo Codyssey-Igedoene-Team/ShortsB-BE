@@ -52,7 +52,7 @@
 ## 저장 구조와 변경 관리
 
 - 현재 schema.sql에는 books의 topics·moods·edition·language·source_url·rights_evidence가 이미 존재한다. 같은 메타데이터 필드가 없다고 설명하거나 중복 추가하지 않는다.
-- 신규 원문 등록은 book_pages, 원본 페이지/UTF-16 검색 위치는 book_search_segments, 외부 ID·자료 버전·쪽수·해시·출처/번역/챕터 메타데이터는 books에 저장한다. 기존 book_segments와 book_relations의 연결은 R3/R4 전환까지 유지한다.
+- 신규 원문 등록은 book_pages, 원본 페이지/UTF-16 검색 위치는 book_search_segments, 외부 ID·자료 버전·쪽수·해시·출처/번역/챕터 메타데이터는 books에 저장한다. 기존 book_segments와 book_relations의 연결은 보존한다. R3 전체 독서는 book_pages를 참조하는 별도 book_reading_sessions를 사용하며 신규 대비는 R4의 book_contrast_relations·003 변경 SQL을 작성했으며 근거 승인·DB 적용은 대기 중이다.
 - schema.sql은 초기 생성용이고 기존 R1 DB 변경용은 migrations/001-content-embeddings.sql이다. 도서와 사전 벡터를 가져오는 수동 Java 명령을 작성했으나 DB 적용·등록·검사는 실행하지 않았다. [등록 절차](../database/content-import.md)를 따른다.
 - 본문/카드 벡터는 PostgreSQL double precision[]에 저장하고 모델 설정 fingerprint와 연결한다. 도서만 먼저 등록할 수 있으며 본문 전체/카드 3종이 같은 모델로 검증·등록됐을 때만 추천 모델 설정을 반영한다. 신규 도서는 unverified이며 자동 권한 승인은 없다.
 - 공개 후 표시 페이지·본문이 바뀌면 기존 독서 위치·검색 구간·해시·벡터 재생성에 미치는 영향을 검토한다. 요청마다 본문 재분할을 수행하지 않는다.

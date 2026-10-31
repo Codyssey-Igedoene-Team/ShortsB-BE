@@ -58,3 +58,14 @@ tasks.register('importCatalog', JavaExec) {
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
+
+// 사람 검수 자료의 DB 대조 또는 명시적 반영
+tasks.register('importContrasts', JavaExec) {
+    group = 'application'
+    description = '대비 근거 검수 파일 대조·등록'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.shortsb.recommendation.command.ContrastImportCommand'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}

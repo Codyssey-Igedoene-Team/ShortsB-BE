@@ -34,6 +34,16 @@ public class BookServiceImpl implements BookService {
         return approved(bookId).response();
     }
 
+    // 전체 독서에서 한 원본 페이지 조회. 조회 자체는 진행 저장 없음
+    @Override
+    public PageResponse getPage(long bookId, int pageNo) {
+        BookData book = approved(bookId);
+        if (pageNo < 1 || pageNo > book.response().totalPageCount()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PAGE_NOT_FOUND", "해당 페이지를 찾을 수 없습니다.");
+        }
+        return getExcerpt(bookId, book.contentHash(), book.response().totalPageCount(), pageNo, pageNo).pages().getFirst();
+    }
+
     @Override
     public Excerpt getExcerpt(long bookId, String contentHash, int totalPages, int startPageNo, int endPageNo) {
         BookData book = approved(bookId);

@@ -35,11 +35,26 @@ public class RecommendationRepository {
     // GPU 요청 전에 조회 트랜잭션 종료. 본문은 검색 스냅샷에 포함하지 않음
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public SearchData loadSearchData(StoryType type) {
-        List<ActiveModel> active = jdbc.query("""
+        return loadData(type, null, null);
+    }
+
+    // 대비는 첫 발췌 모델을 유지하며 카드 벡터를 다시 강제하지 않음
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public SearchData loadContrastData(String fingerprint, String catalogVersion) {
+        return loadData(null, fingerprint, catalogVersion);
+    }
+
+    private SearchData loadData(StoryType type, String fingerprint, String catalogVersion) {
+        String modelSql = fingerprint == null ? """
                 SELECT m.model_id, m.revision, m.fingerprint, m.dimension, m.normalized, c.catalog_version
                 FROM public.recommendation_configuration c
                 JOIN public.embedding_models m ON m.fingerprint = c.model_fingerprint WHERE c.id = 1
-                """, (rs, row) -> {
+                """ : """
+                SELECT model_id, revision, fingerprint, dimension, normalized, ? AS catalog_version
+                FROM public.embedding_models WHERE fingerprint = ?
+                """;
+        Object[] arguments = fingerprint == null ? new Object[0] : new Object[]{catalogVersion, fingerprint};
+        List<ActiveModel> active = jdbc.query(modelSql, (rs, row) -> {
                     try {
                         return new ActiveModel(new EmbeddingModel(rs.getString("model_id"), rs.getString("revision"),
                                 rs.getString("fingerprint"), rs.getInt("dimension"), rs.getBoolean("normalized")),
@@ -47,11 +62,14 @@ public class RecommendationRepository {
                     } catch (IllegalArgumentException exception) {
                         throw notReady();
                     }
-                });
+                }, arguments);
         if (active.size() != 1) {
             throw notReady();
         }
         ActiveModel selected = active.getFirst();
+        if (catalogVersion != null && !catalogVersion.equals(selected.catalogVersion())) {
+            throw notReady();
+        }
         EmbeddingModel model = selected.model();
         List<BookData> approved = books.findApprovedBooks().stream()
                 .filter(book -> selected.catalogVersion().equals(book.catalogVersion())).toList();
@@ -84,7 +102,7 @@ public class RecommendationRepository {
             throw notReady();
         }
         List<Double> card = List.of();
-        if (type != StoryType.ANY) {
+        if (type != null && type != StoryType.ANY) {
             List<List<Double>> cards = jdbc.query("""
                     SELECT embedding FROM public.card_embeddings WHERE model_fingerprint = ?
                         AND card_code = ? AND dimension = ?
@@ -134,7 +152,7 @@ public class RecommendationRepository {
     }
 
     public static ApiException notReady() {
-        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "RECOMMENDATION_NOT_READY", "추천 모델·카드·본문 벡터를 확인해주세요.");
+        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "RECOMMENDATION_NOT_READY", "추천 모델·필요한 사전 벡터를 확인해주세요.");
     }
 
     private record ActiveModel(EmbeddingModel model, String catalogVersion) {}

@@ -313,4 +313,90 @@ CREATE TABLE public.recommendation_configuration
 -- 권한 승인·추천 공개는 별도. 모델 설정 등록만으로 미검토 작품을 공개하지 않음
 -- R2 추가 테이블 끝
 
+-- R3 전체 독서 시작
+-- 전체 독서: 발췌와 분리한 책 전체의 현재/최대 위치·저장 버전
+CREATE TABLE public.book_reading_sessions
+(
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 전체 독서 세션 내부 ID
+    user_id bigint NOT NULL REFERENCES public.users (id) ON DELETE CASCADE, -- 기록 소유 회원
+    book_id bigint NOT NULL REFERENCES public.books (id) ON DELETE RESTRICT, -- 전체 독서 작품 ID
+    content_sha256 varchar(64) NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'), -- 시작 당시 전체 본문 해시
+    total_pages integer NOT NULL CHECK (total_pages > 0), -- 시작 당시 전체 표시 페이지 수
+    total_utf16_length bigint NOT NULL CHECK (total_utf16_length > 0), -- 페이지 구분자 제외 전체 본문 길이
+    current_page_no integer NOT NULL DEFAULT 1, -- 이어 읽을 현재 페이지. 1부터 시작
+    current_position integer NOT NULL DEFAULT 0 CHECK (current_position >= 0), -- 현재 페이지 내 UTF-16 위치
+    furthest_page_no integer NOT NULL DEFAULT 1, -- 최대 도달 페이지
+    furthest_position integer NOT NULL DEFAULT 0 CHECK (furthest_position >= 0), -- 최대 페이지 내 UTF-16 위치
+    furthest_offset bigint NOT NULL DEFAULT 0, -- 전체 본문 기준 최대 누적 UTF-16 위치
+    status varchar(20) NOT NULL DEFAULT 'reading' CHECK (status IN ('reading', 'paused', 'completed')), -- 전체 독서 상태
+    version bigint NOT NULL DEFAULT 0 CHECK (version >= 0), -- 진행/완료 갱신마다 증가하는 저장 버전
+    started_at timestamptz NOT NULL DEFAULT now(), -- 전체 독서 시작 시각
+    updated_at timestamptz NOT NULL DEFAULT now(), -- 마지막 진행·완료 저장 시각
+    completed_at timestamptz, -- 책 전체 완료 시각. 미완료면 NULL
+    CHECK (current_page_no BETWEEN 1 AND total_pages AND furthest_page_no BETWEEN 1 AND total_pages),
+    CHECK ((current_page_no, current_position) <= (furthest_page_no, furthest_position)),
+    CHECK (furthest_offset BETWEEN 0 AND total_utf16_length),
+    CHECK ((status = 'completed' AND completed_at IS NOT NULL AND current_page_no = total_pages
+                AND current_page_no = furthest_page_no AND current_position = furthest_position
+                AND furthest_offset = total_utf16_length) OR (status <> 'completed' AND completed_at IS NULL)),
+    FOREIGN KEY (book_id, current_page_no) REFERENCES public.book_pages (book_id, page_no) ON DELETE RESTRICT,
+    FOREIGN KEY (book_id, furthest_page_no) REFERENCES public.book_pages (book_id, page_no) ON DELETE RESTRICT
+);
+-- 페이지 내 위치 상한·누적 위치·마지막 끝 도달은 서버 트랜잭션에서 추가 검증
+
+-- 한 회원이 같은 책에 유지하는 미완료 전체 독서는 하나
+CREATE UNIQUE INDEX uq_book_reading_sessions_unfinished
+    ON public.book_reading_sessions (user_id, book_id) WHERE status IN ('reading', 'paused');
+
+-- 이어 읽기: 본인의 최근 미완료 기록
+CREATE INDEX idx_book_reading_sessions_current
+    ON public.book_reading_sessions (user_id, updated_at DESC, id DESC) WHERE status IN ('reading', 'paused');
+-- R3 전체 독서 끝
+
+-- R4 대비 관계 시작
+-- 방향성 대비 관계: 실제 양쪽 근거와 사람의 검수 상태 저장
+CREATE TABLE public.book_contrast_relations
+(
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 대비 관계 내부 ID
+    source_book_id bigint NOT NULL REFERENCES public.books (id) ON DELETE RESTRICT, -- 기준 작품 ID
+    target_book_id bigint NOT NULL REFERENCES public.books (id) ON DELETE RESTRICT, -- 대비 작품 ID
+    axis varchar(30) NOT NULL CHECK (axis IN ('texture','perspective','tone','attitude','ending','setting')), -- 결·시선·어조·태도·결말·시대/배경
+    common_topic text, -- 사람이 확인한 공통 연결 주제. 후보 단계에서는 미확정 가능
+    reason text, -- 검수한 대비 설명
+    source_content_sha256 varchar(64) CHECK (source_content_sha256 ~ '^[0-9a-f]{64}$'), -- 검수 당시 기준 작품 본문 해시
+    target_content_sha256 varchar(64) CHECK (target_content_sha256 ~ '^[0-9a-f]{64}$'), -- 검수 당시 대상 작품 본문 해시
+    source_start_page_no integer, -- 기준 근거 첫 페이지. 1-based
+    source_end_page_no integer, -- 기준 근거 마지막 페이지. 포함
+    source_evidence text, -- 기준 범위에 실제 존재하는 검수 구절
+    target_start_page_no integer, -- 대상 근거 첫 페이지. 1-based
+    target_end_page_no integer, -- 대상 근거 마지막 페이지. 포함
+    target_evidence text, -- 대상 범위에 실제 존재하는 검수 구절
+    review_status varchar(20) NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending','approved','rejected')), -- 검토 대기·승인·제외
+    reviewed_by varchar(100), -- 사람이 입력한 검수자 식별 표시
+    reviewed_at timestamptz, -- 명시적으로 승인/제외한 시각
+    created_at timestamptz NOT NULL DEFAULT now(), -- 후보 최초 등록 시각
+    updated_at timestamptz NOT NULL DEFAULT now(), -- 마지막 검수 상태 반영 시각
+    UNIQUE (source_book_id, target_book_id, axis),
+    CHECK (source_book_id <> target_book_id),
+    CHECK ((source_start_page_no IS NULL AND source_end_page_no IS NULL) OR
+        (source_start_page_no IS NOT NULL AND source_end_page_no IS NOT NULL AND source_start_page_no > 0
+            AND source_end_page_no >= source_start_page_no AND source_end_page_no - source_start_page_no < 10)),
+    CHECK ((target_start_page_no IS NULL AND target_end_page_no IS NULL) OR
+        (target_start_page_no IS NOT NULL AND target_end_page_no IS NOT NULL AND target_start_page_no > 0
+            AND target_end_page_no >= target_start_page_no AND target_end_page_no - target_start_page_no < 10)),
+    CHECK (review_status <> 'approved' OR (
+        source_content_sha256 IS NOT NULL AND target_content_sha256 IS NOT NULL
+        AND source_start_page_no IS NOT NULL AND target_start_page_no IS NOT NULL
+        AND coalesce(btrim(common_topic),'') <> '' AND coalesce(btrim(reason),'') <> ''
+        AND coalesce(btrim(source_evidence),'') <> '' AND coalesce(btrim(target_evidence),'') <> ''
+        AND coalesce(btrim(reviewed_by),'') <> '' AND reviewed_at IS NOT NULL)),
+    CHECK (review_status <> 'rejected' OR (coalesce(btrim(reviewed_by),'') <> '' AND reviewed_at IS NOT NULL)),
+    FOREIGN KEY (source_book_id, source_start_page_no) REFERENCES public.book_pages (book_id,page_no),
+    FOREIGN KEY (source_book_id, source_end_page_no) REFERENCES public.book_pages (book_id,page_no),
+    FOREIGN KEY (target_book_id, target_start_page_no) REFERENCES public.book_pages (book_id,page_no),
+    FOREIGN KEY (target_book_id, target_end_page_no) REFERENCES public.book_pages (book_id,page_no)
+);
+-- 구절의 실제 포함·본문 버전·권한은 등록 서비스와 추천 요청에서 추가 검증
+-- R4 대비 관계 끝
+
 COMMIT;
