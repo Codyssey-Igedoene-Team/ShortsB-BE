@@ -38,4 +38,7 @@ out/
 
 ## AI
 AGENTS.md
-docs/
+
+## DB 파일 허용
+docs/*
+!docs/database/
