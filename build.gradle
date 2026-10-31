@@ -8,6 +8,10 @@ group = 'com.shortsb'
 version = '0.0.1-SNAPSHOT'
 description = 'ShortsB-BE'
 
+springBoot {
+    mainClass = 'com.shortsb.ShortsBBeApplication'
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -42,4 +46,15 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// 웹 서버 자동 시작과 분리한 수동 도서 검증·등록 명령
+tasks.register('importCatalog', JavaExec) {
+    group = 'application'
+    description = '도서·페이지·사전 벡터 검증 또는 명시적 DB 등록'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.shortsb.book.command.CatalogImportCommand'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }

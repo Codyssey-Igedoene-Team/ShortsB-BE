@@ -22,7 +22,7 @@ CREATE TABLE public.users
     CONSTRAINT users_oauth_subject_check CHECK (btrim(oauth_subject) <> '')
 );
 
--- 취향: 회원별 장르·주제·분위기 선호를 보관한다. 입력값 목록과 건너뛰기 정책은 별도 확정한다.
+-- 기존 취향: 장르·주제·분위기 배열 보관용. 현재 필수 카드·선택 프롬프트 입력과 구분
 CREATE TABLE public.user_preferences
 (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 취향 레코드 ID
@@ -42,6 +42,12 @@ CREATE TABLE public.books
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 도서 콘텐츠 ID
     title varchar(255) NOT NULL, -- 도서 제목
     author varchar(150) NOT NULL, -- 저자 표시명
+    external_id varchar(64), -- 제공 자료의 안정적인 작품 ID. 기존 수동 자료는 NULL 허용
+    catalog_version text, -- 원본 자료 버전
+    page_count integer, -- 원본 표시 페이지 수
+    text_sha256 varchar(64), -- 페이지 재결합 본문의 SHA-256
+    page_joiner text, -- 원본 페이지 사이 구분 문자열
+    source_metadata jsonb, -- 본문을 제외한 출처·번역·챕터 등 원본 메타데이터
     author_bio text, -- 검토한 작가 생애 소개
     author_bio_source_url text, -- 작가 생애 정보의 근거 출처 URL
     description text, -- 도서 소개
@@ -56,6 +62,18 @@ CREATE TABLE public.books
     rights_evidence text, -- 해당 판본·번역문을 제공할 수 있는 권한 확인 근거
     content_rights varchar(30) NOT NULL DEFAULT 'unverified', -- 권한 검토 상태: unverified, approved, rejected
     created_at timestamptz NOT NULL DEFAULT now(), -- 도서 등록 시각
+    CONSTRAINT books_external_id_key UNIQUE (external_id),
+    CONSTRAINT books_import_metadata_check CHECK (
+        (external_id IS NULL AND catalog_version IS NULL AND page_count IS NULL
+            AND text_sha256 IS NULL AND page_joiner IS NULL AND source_metadata IS NULL) OR
+        (external_id IS NOT NULL AND external_id ~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+            AND catalog_version IS NOT NULL AND btrim(catalog_version) <> ''
+            AND page_count IS NOT NULL AND page_count > 0
+            AND text_sha256 IS NOT NULL AND text_sha256 ~ '^[0-9a-f]{64}$'
+            AND page_joiner IS NOT NULL AND source_metadata IS NOT NULL
+            AND jsonb_typeof(source_metadata) = 'object'
+            AND NOT (source_metadata ?| ARRAY['text', 'pages']))
+    ),
     CONSTRAINT books_title_check CHECK (btrim(title) <> ''),
     CONSTRAINT books_author_check CHECK (btrim(author) <> ''),
     CONSTRAINT books_content_rights_check
@@ -71,7 +89,8 @@ CREATE TABLE public.books
     )
 );
 
--- 본문 구간: 도서의 실제 본문을 순서대로 저장한다. 공개 후 텍스트·분할 변경 시 기존 위치 영향을 검토한다.
+-- 기존 본문 구간: R3/R4 전환 전 독서·대비 FK 유지용. 신규 등록은 book_pages·book_search_segments 사용.
+-- 도서의 실제 본문을 순서대로 저장한다. 공개 후 텍스트·분할 변경 시 기존 위치 영향을 검토한다.
 CREATE TABLE public.book_segments
 (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 본문 구간 ID
@@ -87,7 +106,8 @@ CREATE TABLE public.book_segments
         REFERENCES public.books (id) ON DELETE CASCADE
 );
 
--- 독서 세션: 사용자가 선택한 구간 범위와 재개 위치, 분량 완료 상태를 보관한다. 로그인 세션과 별개다.
+-- 기존 독서 세션: 선택 구간 기준 구조. 전체 책·현재/최대 위치·버전 전환은 R3에서 별도 반영
+-- 로그인 세션과 별개인 독서 기록
 CREATE TABLE public.reading_sessions
 (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 독서 세션 ID
@@ -138,7 +158,8 @@ CREATE INDEX idx_reading_sessions_current
     ON public.reading_sessions (user_id, updated_at DESC, id DESC)
     WHERE status IN ('reading', 'paused');
 
--- 대비 관계: 공통 주제를 가진 두 도서와 양쪽 근거 구간을 연결한다. 방향은 source에서 target이다.
+-- 기존 대비 관계: 양쪽 근거 구간 연결 구조. 페이지 범위·6개 대비 축 전환은 R4에서 별도 반영
+-- 공통 주제를 가진 두 도서의 방향성 관계. source에서 target 방향
 CREATE TABLE public.book_relations
 (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 대비 관계 ID
@@ -197,5 +218,99 @@ CREATE TABLE public.recommendation_logs
     CONSTRAINT recommendation_logs_relation_id_fkey FOREIGN KEY (relation_id)
         REFERENCES public.book_relations (id) ON DELETE CASCADE
 );
+
+-- R2 추가 테이블 시작
+-- 표시 페이지: 제공 자료의 pages 배열을 순서와 내용 그대로 저장
+CREATE TABLE public.book_pages
+(
+    book_id bigint NOT NULL, -- 서비스 내부 도서 ID
+    page_no integer NOT NULL CHECK (page_no > 0), -- 표시 페이지 번호. 1부터 시작
+    content text NOT NULL CHECK (btrim(content) <> ''), -- 원본 페이지 본문
+    content_sha256 varchar(64) NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'), -- 페이지 UTF-8 본문의 SHA-256
+    utf16_length integer NOT NULL CHECK (utf16_length > 0), -- 페이지 내 위치 상한. Java 문자열 길이
+    PRIMARY KEY (book_id, page_no),
+    FOREIGN KEY (book_id) REFERENCES public.books (id) ON DELETE RESTRICT
+);
+
+-- 검색 구간: 본문 중복 없이 원본 페이지와 UTF-16 범위 연결
+CREATE TABLE public.book_search_segments
+(
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, -- 검색 구간 내부 ID
+    external_id varchar(128) NOT NULL UNIQUE CHECK (btrim(external_id) <> ''), -- 사전 임베딩 입력의 안정 ID
+    book_id bigint NOT NULL, -- 구간이 속한 도서 ID
+    page_no integer NOT NULL, -- 구간이 속한 표시 페이지 번호
+    start_position integer NOT NULL CHECK (start_position >= 0), -- 페이지 내 UTF-16 시작 위치. 포함
+    end_position integer NOT NULL CHECK (end_position > start_position), -- 페이지 내 UTF-16 끝 위치. 제외
+    content_sha256 varchar(64) NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'), -- 구간 원문의 SHA-256
+    UNIQUE (book_id, page_no, start_position, end_position),
+    FOREIGN KEY (book_id, page_no) REFERENCES public.book_pages (book_id, page_no) ON DELETE RESTRICT
+);
+-- 페이지 수·연속성·UTF-16 상한·본문 해시는 등록 서비스에서 추가 검증
+
+-- 임베딩 모델: Python과 공유하는 불변 설정. 장치·생성 시각은 호환성 지문에서 제외
+CREATE TABLE public.embedding_models
+(
+    fingerprint varchar(64) PRIMARY KEY CHECK (fingerprint ~ '^[0-9a-f]{64}$'), -- 모델 설정의 정규 JSON SHA-256
+    model_id text NOT NULL CHECK (btrim(model_id) <> ''), -- 공개 모델 저장소 ID
+    revision varchar(40) NOT NULL CHECK (revision ~ '^[0-9a-f]{40}$'), -- 고정 모델 커밋
+    dimension integer NOT NULL CHECK (dimension > 0), -- 벡터 차원
+    normalized boolean NOT NULL CHECK (normalized), -- L2 정규화 여부. true만 허용
+    configuration jsonb NOT NULL CHECK (jsonb_typeof(configuration) = 'object'), -- 토큰 상한·전처리·접두사·라이브러리 등 지문 대상 설정
+    created_at timestamptz NOT NULL DEFAULT now(), -- 최초 등록 시각
+    UNIQUE (fingerprint, dimension)
+);
+
+-- 본문 벡터: 검색 구간과 정확히 같은 원문에서 GPU로 생성한 document 임베딩
+CREATE TABLE public.book_segment_embeddings
+(
+    segment_id bigint NOT NULL REFERENCES public.book_search_segments (id) ON DELETE RESTRICT, -- 원본 검색 구간 ID
+    model_fingerprint varchar(64) NOT NULL, -- 벡터를 생성한 모델 설정 지문
+    dimension integer NOT NULL, -- 모델 FK 및 벡터 길이 검증용 차원
+    embedding double precision[] NOT NULL, -- 정규화된 document 벡터
+    PRIMARY KEY (segment_id, model_fingerprint),
+    FOREIGN KEY (model_fingerprint, dimension) REFERENCES public.embedding_models (fingerprint, dimension),
+    CONSTRAINT book_segment_embeddings_vector_check CHECK (
+        array_ndims(embedding) = 1 AND array_lower(embedding, 1) = 1
+        AND cardinality(embedding) = dimension AND array_position(embedding, NULL) IS NULL
+        AND NOT ('NaN'::double precision = ANY (embedding))
+        AND NOT ('Infinity'::double precision = ANY (embedding))
+        AND NOT ('-Infinity'::double precision = ANY (embedding))
+    )
+);
+
+-- 카드 벡터: ANY를 제외한 세 카드의 검색 문장과 사전 query 임베딩
+CREATE TABLE public.card_embeddings
+(
+    model_fingerprint varchar(64) NOT NULL, -- 본문 벡터와 같은 모델 설정 지문
+    card_code varchar(20) NOT NULL CHECK (card_code IN ('WARM', 'HUMOR', 'THOUGHTFUL')), -- 고정 카드 코드
+    input_id varchar(128) NOT NULL CHECK (btrim(input_id) <> ''), -- 카드 검색 문장의 버전 포함 원본 ID
+    query_text text NOT NULL CHECK (btrim(query_text) <> ''), -- 사전 생성에 사용한 카드 검색 문장
+    content_sha256 varchar(64) NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'), -- 검색 문장의 SHA-256
+    dimension integer NOT NULL, -- 모델 FK 및 벡터 길이 검증용 차원
+    embedding double precision[] NOT NULL, -- 정규화된 query 벡터
+    PRIMARY KEY (model_fingerprint, card_code),
+    FOREIGN KEY (model_fingerprint, dimension) REFERENCES public.embedding_models (fingerprint, dimension),
+    CONSTRAINT card_embeddings_vector_check CHECK (
+        array_ndims(embedding) = 1 AND array_lower(embedding, 1) = 1
+        AND cardinality(embedding) = dimension AND array_position(embedding, NULL) IS NULL
+        AND NOT ('NaN'::double precision = ANY (embedding))
+        AND NOT ('Infinity'::double precision = ANY (embedding))
+        AND NOT ('-Infinity'::double precision = ANY (embedding))
+    )
+);
+
+-- 추천 설정: 본문 전체와 카드 3종 등록에 성공한 트랜잭션에서만 사용할 모델 전환
+CREATE TABLE public.recommendation_configuration
+(
+    id integer PRIMARY KEY CHECK (id = 1), -- 단일 추천 설정 행의 고정 ID
+    model_fingerprint varchar(64) NOT NULL REFERENCES public.embedding_models (fingerprint), -- 검색과 온라인 query에 사용할 모델 지문
+    catalog_version text NOT NULL CHECK (btrim(catalog_version) <> ''), -- 검증된 도서 자료 버전
+    catalog_source_sha256 varchar(64) NOT NULL CHECK (catalog_source_sha256 ~ '^[0-9a-f]{64}$'), -- 준비 manifest의 원본 자료 파일 SHA-256
+    book_count integer NOT NULL CHECK (book_count > 0), -- 해당 등록 묶음의 작품 수
+    segment_count integer NOT NULL CHECK (segment_count > 0), -- 해당 등록 묶음의 본문 벡터 수
+    updated_at timestamptz NOT NULL DEFAULT now() -- 추천 설정 반영 시각
+);
+-- 권한 승인·추천 공개는 별도. 모델 설정 등록만으로 미검토 작품을 공개하지 않음
+-- R2 추가 테이블 끝
 
 COMMIT;

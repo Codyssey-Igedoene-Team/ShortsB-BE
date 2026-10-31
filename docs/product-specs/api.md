@@ -1,6 +1,6 @@
 # API 명세 초안
 
-R1의 인증·본인 조회·CSRF·로그아웃 API는 사용자의 전체 검증 완료 보고를 기준으로 완료 처리했다. 개별 실행 로그는 별도로 수집하지 않았으며 운영·프런트 통합 검증은 R5에서 수행한다. 아래 발췌·도서·전체 독서 API는 최신 제품 흐름을 표현한 제안 계약으로 구현 전이다. 경로·필드·오류 세부 사항은 프런트와 합의 후 고정한다.
+R1의 인증·본인 조회·CSRF·로그아웃 API는 사용자의 전체 검증 완료 보고를 기준으로 완료 처리했다. 개별 실행 로그는 별도로 수집하지 않았으며 운영·프런트 통합 검증은 R5에서 수행한다. 첫 추천 생성·발췌 재조회·도서 정보 API 코드를 작성했다. Spring 실행·DB/GPU 통합은 미검증이다. 대비·전체 독서 API는 아직 구현 전 제안 계약이다.
 
 ## 공통 규칙
 
@@ -21,7 +21,7 @@ Spring의 EmbeddingService/EmbeddingServiceImpl이 FastAPI GET /health·POST /em
 - 내부 API 인증키만 X-API-Key로 보내며 Google 자격 증명·사용자 세션 쿠키를 전달하지 않는다. 외부 오류 본문·프롬프트·키를 오류 응답에 포함하지 않는다.
 - 앱 시작 시 호출하지 않으며 서비스 코드에 자동 재시도는 없다. 접속 주소·키·제한 시간은 Spring 환경변수로 설정한다.
 
-향후 업무 API에서 이 서비스를 사용할 때 적용할 오류는 다음과 같다. 공통 code/message 구조로 변환한다.
+첫 추천 API에서 이 서비스를 사용할 때 적용하는 오류는 다음과 같다. 공통 code/message 구조로 변환한다.
 
 | 상황 | 상태 | 코드 |
 | --- | --- | --- |
@@ -76,39 +76,90 @@ Spring의 EmbeddingService/EmbeddingServiceImpl이 FastAPI GET /health·POST /em
 
 로그아웃 문서는 Security 필터가 처리하는 경로를 OpenAPI에 등록한 것이다. 구글 로그인은 페이지 이동으로 진행하며, Swagger의 일반 API 실행으로 구글 인증 화면을 호출하지 않는다. 클라이언트 비밀값·세션 쿠키를 입력할 필요는 없다. 위 절차는 사용자 검증 완료 이후에도 회귀 확인 안내로 유지한다.
 
-## 후속 API의 상태와 입력
+## 첫 추천 입력과 구현 상태
 
-다음 경로·필드는 **설계 초안**이며 실제 등록된 API가 아니다. 기존 취향 배열 GET/PUT, 선택 분량 독서 세션, 완료한 세션을 요구하던 대비 추천 초안은 현재 흐름의 기준에서 제외한다. 별도 취향 저장은 필수 범위에 포함하지 않으며 기존 DB 테이블 삭제를 의미하지 않는다.
+아래 도서 정보·첫 발췌 생성·발췌 재조회는 코드 작성 상태이며 실행 검증 전이다. 대비·전체 독서 경로는 후속 제안이다. 신규 테스트 코드는 사용자 요청으로 작성하지 않았다.
 
-- 입력: `requestedPageCount`는 1~10 정수, `storyType`은 필수 카드 하나, `prompt`는 선택 문자열.
-- 카드 코드 제안: `WARM`, `HUMOR`, `THOUGHTFUL`, `ANY`. 코드와 prompt 최대 길이는 프런트와 최종 합의한다.
-- 빈/공백 프롬프트는 입력 없음으로 정규화하는 방향이다. 카드 누락과 ANY는 구분한다.
-- 도서의 내부 bigint ID와 자료의 외부 문자열 id를 혼용하지 않는다. 외부 ID 매핑 필드·저장은 구현 설계 사항이다.
+| 필드 | 입력 계약 |
+| --- | --- |
+| requestedPageCount | 필수 JSON 정수 1~10. 숫자 문자열·소수 거절 |
+| storyType | 필수 WARM/HUMOR/THOUGHTFUL/ANY 중 하나. 대소문자 구분 |
+| prompt | 선택 문자열 또는 null. UTF-16 2,000단위 이하. 공백만 있으면 입력 없음 |
+
+프롬프트는 공백만 있는 입력을 제외하면 원문을 유지한다. NUL·고립 서로게이트 등 잘못된 인코딩은 400이다. 임베딩 모델의 실제 토큰 상한도 적용한다. 내부 bigint ID는 응답에서 문자열이며 제공 자료의 외부 ID와 혼용하지 않는다.
 
 ## 도서 조회
 
-| 제안 메서드·경로 | 동작 |
+| 메서드·경로 | 결과 |
 | --- | --- |
-| `GET /api/books/{bookId}` | 승인 도서의 제목·저자·전체 쪽수·판본·언어·출처·AI 번역 안내 조회 |
+| GET /api/books/{bookId} | 200. 승인된 작품 정보·전체 쪽수·판본·언어·출처·이용 조건·번역 안내 |
 
-미존재·미승인 도서는 404 방향을 유지한다. 반환 본문 범위와 상세 메타데이터 필드명은 최종 계약에서 확정한다.
+bookId는 양의 정수인 내부 ID다. 존재하지 않거나 미승인·페이지 미준비 자료는 404 / BOOK_NOT_FOUND다. 전체 본문은 이 API로 반환하지 않는다. 도서 응답 필드는 아래 발췌 응답의 book과 같다.
 
-## 첫 발췌와 대비 발췌
+## 첫 발췌 생성·재조회
 
-| 제안 메서드·경로 | 요청 | 응답 초안 |
+| 메서드·경로 | 요청 | 결과 |
 | --- | --- | --- |
-| `POST /api/previews` | requestedPageCount·storyType·선택 prompt | 첫 발췌 식별자와 작품·페이지·추천 이유 |
-| `POST /api/previews/{previewId}/contrast` | 첫 발췌 참조 | 같은 원래 요청 쪽수의 대비 발췌·공통 주제·대비 축·이유 |
+| POST /api/previews | requestedPageCount·storyType·선택 prompt | 201. 첫 발췌와 Location: /api/previews/{previewId} |
+| GET /api/previews/{previewId} | 같은 로그인 세션·응답 UUID | 200. GPU 재호출 없이 동일 발췌 범위 조회 |
 
-- POST는 로그인·CSRF가 필요하다. 발췌 식별자·원래 요청 쪽수·카드/프롬프트·작품 ID·실제 페이지 범위를 서버 세션에 임시 보관하고 소유자를 검증한다. 본문을 복사하지 않고 DB에서 조회한다. 대비 요청의 식별자로 세션의 원래 입력·범위를 확인하며 클라이언트가 다시 보낸 범위로 대체하지 않는다. 별도 발췌 DB 테이블은 만들지 않는다. 세션 만료·로그아웃·서버 재시작 등으로 발췌 정보가 사라지면 새 추천을 요청한다. 정확한 오류 코드·보관 개수·삭제 정책은 구현 전 고정한다.
-- 발췌 응답 필드 제안: previewId, bookId, title, requestedPageCount, actualPageCount, totalPageCount, startPageNo, endPageNo, pages, reason. pages는 pageNo와 원문 content를 포함한다. 로그에 원문을 출력하지 않는다.
-- 업무 API 페이지는 1-based이며 입력 JSON 배열·chapters의 0-based와 가져오기 경계에서 변환한다.
-- 실제 수는 min(requestedPageCount,totalPageCount). 연속 범위에 검색/대비 근거를 포함하고 끝부분에서 시작점을 조정한다.
-- 총 8쪽 작품에 10쪽 요청이면 8쪽을 제공하며 성공 응답이다. 대비 작품 총 20쪽에는 원래 요청 10쪽을 제공한다. 짧은 작품을 요청량 부족만으로 제외하지 않는다.
-- ANY 단독은 유효 작품별 균등 무작위 선택 후 첫 페이지부터 최대 요청량을 제공하며 모델 호출이 필요 없다. 다른 조합은 recommendation.md의 입력별 경로를 따른다.
-- 대비는 전체 독서 세션 생성·완료를 요구하지 않는다. 과거의 미완료 세션 409 조건을 적용하지 않는다.
-- 첫 발췌에 근거가 없거나 적절한 후보가 없으면 대비를 생략하고 첫 책의 전체 독서 시작은 허용한다. 대비 응답은 relationId, contrastAxis, commonTopic, reason과 양쪽 실제 근거 참조를 표현할 수 있어야 한다. contrastAxis의 의미는 결·시선·어조·태도·결말·시대·배경 6개로 고정한다. 영문 코드/직렬화와 필드 세부는 구현 시 일관되게 정한다. CSV의 후보 관계와 승인 관계를 구분하고 승인만 노출한다. 양쪽 근거에는 원본 작품·페이지/범위·필요 시 페이지 내 위치가 있어야 한다. 근거 범위가 요청 발췌에 포함되지 않으면 해당 관계를 사용하지 않는다.
-- 후보 없음의 응답 형태, 모델 장애의 503/대체 응답, 중복 요청·제한 오류 세부 계약은 프런트와 합의한다. 미정 상태를 가짜 본문·성공으로 채우지 않는다.
+POST에는 로그인 쿠키와 GET /api/csrf의 실제 token을 X-CSRF-TOKEN 헤더로 전달한다. GET은 로그인만 필요하다. 삭제된 회원은 401이다. 응답은 Cache-Control: no-store다.
+
+요청 예시:
+
+```json
+{"requestedPageCount":5,"storyType":"WARM","prompt":"다시 시작할 용기를 얻고 싶어요"}
+```
+
+응답 구조:
+
+| 필드 | 의미 |
+| --- | --- |
+| previewId | 세션 발췌 UUID. 문자열 |
+| book | bookId·title·author·totalPageCount·edition·editionLabel·language·workType·sourceName·sourceUrl·licenseUrl·licenseLabel·credits·translationNote |
+| requestedPageCount / actualPageCount | 원래 요청량 / 실제 제공량 |
+| startPageNo / endPageNo | 1-based 시작/끝 페이지. 끝 포함 |
+| storyType | 선택한 카드 |
+| recommendationType | RANDOM / CARD / PROMPT / CARD_AND_PROMPT |
+| matchedPageNo | 벡터 검색 기준 페이지. RANDOM이면 null |
+| reason | 실제 처리한 추천 방식의 고정 안내. 생성형 작품 해석이 아님 |
+| pages | [{pageNo, content}]. 원본 페이지 순서·본문 유지 |
+
+작품 정보는 book 객체에 모으고 bookId·title·totalPageCount를 최상위에 중복하지 않는다. licenseUrl·licenseLabel·credits 등 원본에 없는 출처 필드는 null을 유지한다. translationNote는 AI 번역·교열 전·중역 등 원본 안내를 제공한다.
+
+### 추천 경로와 범위
+
+- 카드만: 해당 사전 query 벡터와 본문 벡터의 코사인 유사도 최댓값 검색.
+- 카드+프롬프트: 기본 0.4×카드 유사도+0.6×프롬프트 유사도. APP_RECOMMENDATION_PROMPT_WEIGHT로 프롬프트 비중을 설정하고 카드 비중은 1-설정값이다. 유한한 0~1만 허용한다.
+- ANY+프롬프트: 프롬프트 query만으로 검색.
+- ANY 단독: 승인된 유효 작품별 균등 무작위 선택 후 첫 페이지부터 제공. 모델·카드·본문 벡터 조회와 FastAPI 호출 없음.
+- 벡터 검색은 활성 모델·자료 버전에 맞고 전체 페이지 벡터가 준비된 승인 작품을 사용한다. 동점은 내부 도서 ID·페이지·검색 구간 ID 오름차순이다. 프롬프트가 있을 때만 FastAPI를 호출한다.
+- 실제 제공량 A=min(요청 N,작품 P). 검색 기준 페이지 M에서 시작=max(1,min(M-floor((A-1)/2),P-A+1)), 끝=시작+A-1이다. 검색 대목을 포함하는 연속 범위를 반환한다. ANY 단독은 M=1이다.
+- 10쪽 요청에 총 8쪽 작품이면 성공 8쪽이며, 전체 20쪽 작품은 10쪽이다. 발췌를 전체 독서 기록이나 완료로 합산하지 않는다.
+
+### 세션·오류
+
+발췌 ID·회원 ID·원래 쪽수/카드/프롬프트·작품/본문 해시·전체 쪽수·실제 범위·모델 지문·추천 경로를 로그인 세션에 보관한다. 본문·벡터를 보관하지 않는다. 최대 10개이며 초과 시 생성 순서가 가장 오래된 발췌를 제거한다. 재조회는 보관 순서를 바꾸지 않는다. 별도 발췌 DB 테이블은 없다.
+
+| 상황 | 상태 / 코드 |
+| --- | --- |
+| 입력 형식·범위·프롬프트 인코딩 오류 | 400 / INVALID_REQUEST |
+| 비로그인·삭제 회원 | 401 / AUTHENTICATION_REQUIRED |
+| POST CSRF 실패 | 403 / CSRF_INVALID |
+| 유효한 승인 작품 없음 | 404 / NO_RECOMMENDATION_CANDIDATES |
+| 세션 발췌 없음·제거됨·소유자 불일치 | 404 / PREVIEW_NOT_FOUND |
+| 작품 미존재·미승인·페이지 미준비 | 404 / BOOK_NOT_FOUND |
+| 저장했던 작품 본문 해시·쪽수 변경 | 409 / PREVIEW_CONTENT_CHANGED |
+| 활성 모델·선택 카드·전체 본문 벡터 준비 부족 | 503 / RECOMMENDATION_NOT_READY |
+| 실제 반환 페이지의 순서·길이·해시 오류 | 503 / CONTENT_UNAVAILABLE |
+
+모델 설정을 읽을 수 없는 벡터 검색은 후보 판단 전에 503일 수 있다. 임베딩 연결/응답 오류는 상단 내부 임베딩 계약을 따른다. 세션 만료·로그아웃·서버 재시작 뒤에는 새 추천이 필요하며 비로그인 상태라면 필터가 먼저 401을 반환한다. 작품 권한·해시를 재조회 시 확인하며 생성 당시 본문을 세션에서 재노출하지 않는다. 입력·본문·벡터·내부 인증값은 로그나 오류에 넣지 않는다.
+
+### 대비 발췌: 구현 전
+
+POST /api/previews/{previewId}/contrast는 후속 제안 경로다. 첫 발췌 참조를 사용하고 완료한 전체 독서 세션을 요구하지 않는다. 기준/대상 양쪽 실제 발췌에 근거 범위가 포함된 승인 관계만 제공한다. 대비 축은 결·시선·어조·태도·결말·시대·배경 6개다. CSV 후보는 승인 근거가 아니며 정확한 근거 위치·설명을 별도로 검수한다.
+
+두 번째 작품에도 원래 requestedPageCount를 적용한다. 요청 10쪽에 첫 작품 8쪽·대비 작품 20쪽이면 각각 8쪽·10쪽이다. 유효 근거가 없으면 대비만 생략하고 첫 책 전체 독서는 허용한다. relationId·contrastAxis·commonTopic·reason·양쪽 근거 참조와 세부 실패 계약은 R4에서 구현한다.
 
 ## 전체 독서
 
@@ -133,6 +184,6 @@ Spring의 EmbeddingService/EmbeddingServiceImpl이 FastAPI GET /health·POST /em
 
 - FastAPI는 본문·카드 사전 생성과 요청 프롬프트 임베딩을 담당하고 Spring은 DB·검색 점수·정책·페이지를 담당한다.
 - 내부 `GET /health`, `POST /embeddings`는 [인계 문서](../plans/fastapi-ai-handoff.md)의 제안 계약이다. 사용자 세션을 FastAPI로 전달하지 않는다.
-- 모델·GPU 접속·가중치·벡터 저장 방식·최종 요청 제한은 후속 논의한다. 공개 API가 구현됐다고 간주하지 않는다.
+- KURE-v1을 사용하며 벡터는 PostgreSQL double precision[]에 저장하는 SQL·수동 등록 코드를 작성했다. 모델 revision·실제 GPU 접속은 추가 확인한다. 기본 카드/프롬프트 비중은 40%/60%이고 첫 추천 프롬프트는 UTF-16 2,000단위·모델 토큰 상한을 적용한다. 첫 추천·도서 API는 코드 작성 상태이며 실행 검증 전이다. 대비·전체 독서는 구현 전이다.
 - 기본 공유·공유 카드는 무기한 보류하며 전용 API를 필수 범위에 추가하지 않는다. 성과 측정·이벤트 계약 확장도 보류한다.
-- 현재 schema.sql의 선택 범위 중심 reading_sessions·기존 user_preferences·recommendation_logs를 이 문서만으로 변경하지 않는다. 페이지·발췌 참조·전체 독서·CSV 유형 저장의 스키마 영향은 구현 전 별도 설계·변경 SQL로 검토한다.
+- 현재 schema.sql의 선택 범위 중심 reading_sessions·기존 user_preferences·recommendation_logs를 이 문서만으로 변경하지 않는다. 페이지·검색 구간·원본 ID·벡터 저장 변경 SQL은 별도로 작성했다. 발췌는 세션 임시 보관이며 전체 독서·CSV 대비 유형 스키마 전환은 R3/R4에서 검토한다.

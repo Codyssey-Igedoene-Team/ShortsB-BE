@@ -40,6 +40,8 @@ server:
         same-site: ${SERVER_SERVLET_SESSION_COOKIE_SAME_SITE:lax}
 
 app:
+  recommendation:
+    prompt-weight: ${APP_RECOMMENDATION_PROMPT_WEIGHT:}
   embedding:
     base-url: ${APP_EMBEDDING_BASE_URL:}
     api-key: ${APP_EMBEDDING_API_KEY:}

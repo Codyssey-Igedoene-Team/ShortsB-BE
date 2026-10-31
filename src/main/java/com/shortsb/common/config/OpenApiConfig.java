@@ -26,7 +26,7 @@ public class OpenApiConfig {
     @Bean
     OpenAPI shortsbOpenApi() {
         return new OpenAPI()
-                .info(new Info().title("ShortSB API").version("R1")
+                .info(new Info().title("ShortSB API").version("R2")
                         .description("""
                                 ## 로컬 인증 테스트 순서
 
@@ -42,6 +42,14 @@ public class OpenApiConfig {
                                 로그인·로그아웃 후에는 CSRF 토큰을 다시 조회하세요. Example Value의 값이 아닌 실제 응답 토큰을 사용합니다.
                                 비로그인 상태의 내 정보 조회 401, 로그인 상태에서 잘못된 CSRF 토큰으로 로그아웃할 때 403도 확인할 수 있습니다.
                                 구글 로그인은 위 링크로 페이지를 이동해 진행합니다. 클라이언트 비밀값이나 세션 쿠키를 문서에 입력하지 않습니다.
+
+                                ## 첫 추천·발췌 사용 순서
+
+                                로그인·CSRF 토큰 조회 후 **추천 발췌 → 첫 추천 발췌 생성**에서 X-CSRF-TOKEN과 요청 본문을 입력하세요.
+                                요청 예시 네 가지로 카드만·프롬프트만·둘 다·ANY 단독 경로를 확인할 수 있습니다.
+                                생성 응답의 previewId는 발췌 재조회에, book.bookId는 도서 정보 조회에 사용합니다.
+                                실제 데이터 등록과 작품 권한 승인이 먼저 필요합니다. 벡터 검색은 본문/카드 벡터 등록이 필요하고,
+                                프롬프트 입력은 FastAPI GPU 연결도 필요합니다. 대비·전체 독서 API는 아직 제공하지 않습니다.
                                 """))
                 // Security의 LogoutFilter가 실행하는 로그아웃 경로의 문서 등록
                 .path("/api/logout", new PathItem().post(new Operation()

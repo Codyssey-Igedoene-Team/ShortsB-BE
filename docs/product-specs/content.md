@@ -52,7 +52,8 @@
 ## 저장 구조와 변경 관리
 
 - 현재 schema.sql에는 books의 topics·moods·edition·language·source_url·rights_evidence가 이미 존재한다. 같은 메타데이터 필드가 없다고 설명하거나 중복 추가하지 않는다.
-- book_segments는 원문 순서·본문을, book_relations는 양쪽 근거 구간을 연결할 수 있다. 페이지와 내부 검색 구간을 분리해 저장하는 상세 구조·외부 ID 연결·번역 안내 저장은 구현 전 설계한다.
-- 현재 SQL은 초기 생성용이다. 이번 문서 수정에서 변경·적용하지 않으며 DB 등록·변경은 별도 작업이다.
+- 신규 원문 등록은 book_pages, 원본 페이지/UTF-16 검색 위치는 book_search_segments, 외부 ID·자료 버전·쪽수·해시·출처/번역/챕터 메타데이터는 books에 저장한다. 기존 book_segments와 book_relations의 연결은 R3/R4 전환까지 유지한다.
+- schema.sql은 초기 생성용이고 기존 R1 DB 변경용은 migrations/001-content-embeddings.sql이다. 도서와 사전 벡터를 가져오는 수동 Java 명령을 작성했으나 DB 적용·등록·검사는 실행하지 않았다. [등록 절차](../database/content-import.md)를 따른다.
+- 본문/카드 벡터는 PostgreSQL double precision[]에 저장하고 모델 설정 fingerprint와 연결한다. 도서만 먼저 등록할 수 있으며 본문 전체/카드 3종이 같은 모델로 검증·등록됐을 때만 추천 모델 설정을 반영한다. 신규 도서는 unverified이며 자동 권한 승인은 없다.
 - 공개 후 표시 페이지·본문이 바뀌면 기존 독서 위치·검색 구간·해시·벡터 재생성에 미치는 영향을 검토한다. 요청마다 본문 재분할을 수행하지 않는다.
 - 외부 API는 사전 자료 확보·검토에 활용한다. 매 추천 요청에 전체 외부 도서를 수집하지 않는다. `openAPI.md`는 기존 후보 자료이며 수정 보류다.

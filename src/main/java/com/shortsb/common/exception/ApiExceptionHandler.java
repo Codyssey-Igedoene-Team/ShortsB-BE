@@ -20,6 +20,13 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    // 업무 오류의 고정 코드·메시지 반환
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<ApiError> handleBusiness(ApiException exception) {
+        return ResponseEntity.status(exception.status())
+                .body(new ApiError(exception.code(), exception.getMessage()));
+    }
+
     // 임베딩 연결 오류의 안전한 코드·상태 반환
     @ExceptionHandler(EmbeddingException.class)
     public ResponseEntity<ApiError> handleEmbedding(EmbeddingException exception) {
