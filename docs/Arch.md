@@ -21,7 +21,7 @@
 - 요청 흐름: Controller → Service → Repository → PostgreSQL. 외부 도서 API 호출은 연동 코드로 분리한다.
 - 입력 검증·인증은 요청 경계에서, 업무 검증과 트랜잭션은 Service에서 처리한다.
 
-## 인증 구성안
+## 인증 방식 및 구현 예정 사항
 
 - 구글 OIDC 로그인 후 서버 세션으로 인증을 유지하고 브라우저는 세션 쿠키를 전송한다. [Spring Security 공식 문서](https://docs.spring.io/spring-security/reference/servlet/oauth2/login/core.html)
 - OAuth2 Client 의존성과 구글 클라이언트 설정은 구현 시 추가해야 한다. 현재 의존성에는 OAuth2 Client가 없다.
@@ -31,7 +31,7 @@
 
 ## 데이터와 외부 연동
 
-- 스키마 기준은 `database/schema.sql`이다. `database/erd.pgerd`는 참고용이며 스키마 변경과 자동 동기화되지 않는다.
+- 저장소 루트 기준 스키마 위치는 `docs/database/schema.sql`이다. `docs/database/erd.pgerd`는 참고용이며 스키마 변경과 자동 동기화되지 않는다.
 - 사용자·취향·도서·본문 구간·독서 세션·대비 관계·추천 기록을 PostgreSQL에 저장한다.
 - 콘텐츠와 추천 관계는 사전 확보·검수한 데이터를 조회하는 흐름으로 구성한다. AI 모델 선택은 보류한다.
 - 외부 공급원은 `openAPI.md`의 후보 중 확정한다. 외부 장애 시 확보된 콘텐츠를 사용하고 검증되지 않은 후보를 반환하지 않는다.
