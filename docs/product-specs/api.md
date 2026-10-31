@@ -11,6 +11,28 @@ R1의 인증·본인 조회·CSRF·로그아웃 API는 사용자의 전체 검�
 - `400` 잘못된 입력, `401` 로그인 필요, `403` 권한·CSRF 검증 실패, `404` 대상 없음, `405` 지원하지 않는 메서드, `409` 상태 충돌, `415` 지원하지 않는 콘텐츠 형식, `500` 서버 오류를 사용한다.
 - 본인 소유가 아닌 독서 세션은 후속 구현에서 `404`로 처리한다. 상태 변경 요청에는 `GET /api/csrf`에서 받은 CSRF 토큰이 필요하다.
 
+## 내부 임베딩 연결
+
+Spring의 EmbeddingService/EmbeddingServiceImpl이 FastAPI GET /health·POST /embeddings를 호출하는 코드를 작성했다. 프런트가 직접 호출하는 API는 추가하지 않았다. 실제 네트워크·GPU·추천 업무 API 연결은 아직 미검증이다.
+
+- 자유 프롬프트를 query 역할의 단건 요청으로 전송한다. 카드·본문 사전 임베딩이나 ANY 단독 요청을 이 서비스에서 새로 생성하지 않는다.
+- 사전 manifest에서 가져온 modelId·revision·fingerprint·dimension·normalized를 기대 모델로 전달받는다. 프런트 요청값으로 모델 설정을 선택하지 않는다.
+- 응답의 모델 설정·GPU 준비 상태·요청 ID·역할·개수·벡터 차원·유한 실수·L2 정규화를 확인한다.
+- 내부 API 인증키만 X-API-Key로 보내며 Google 자격 증명·사용자 세션 쿠키를 전달하지 않는다. 외부 오류 본문·프롬프트·키를 오류 응답에 포함하지 않는다.
+- 앱 시작 시 호출하지 않으며 서비스 코드에 자동 재시도는 없다. 접속 주소·키·제한 시간은 Spring 환경변수로 설정한다.
+
+향후 업무 API에서 이 서비스를 사용할 때 적용할 오류는 다음과 같다. 공통 code/message 구조로 변환한다.
+
+| 상황 | 상태 | 코드 |
+| --- | --- | --- |
+| 비어 있거나 문자/인코딩 제한을 넘는 입력 | 400 | INVALID_EMBEDDING_INPUT |
+| FastAPI의 입력·토큰 상한 거절 | 400 | EMBEDDING_INPUT_REJECTED |
+| 연결 실패·제한 시간 초과·내부 인증/서버 오류 | 503 | EMBEDDING_UNAVAILABLE |
+| FastAPI가 처리 중 | 503 | EMBEDDING_BUSY |
+| GPU 준비 상태 불일치 | 503 | EMBEDDING_GPU_REQUIRED |
+| 사전 벡터와 모델 설정 불일치 | 503 | EMBEDDING_MODEL_MISMATCH |
+| 잘못된 JSON·응답 참조·벡터 | 502 | EMBEDDING_INVALID_RESPONSE |
+
 ## 인증
 
 | 메서드·경로 | 역할 | 결과 |

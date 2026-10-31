@@ -40,6 +40,11 @@ server:
         same-site: ${SERVER_SERVLET_SESSION_COOKIE_SAME_SITE:lax}
 
 app:
+  embedding:
+    base-url: ${APP_EMBEDDING_BASE_URL:}
+    api-key: ${APP_EMBEDDING_API_KEY:}
+    connect-timeout: ${APP_EMBEDDING_CONNECT_TIMEOUT:}
+    read-timeout: ${APP_EMBEDDING_READ_TIMEOUT:}
   auth:
     login-success-url: ${APP_LOGIN_SUCCESS_URL}
     login-failure-url: ${APP_LOGIN_FAILURE_URL}

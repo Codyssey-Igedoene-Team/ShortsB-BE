@@ -1,6 +1,7 @@
 package com.shortsb.common.exception;
 
 import com.shortsb.common.dto.ApiError;
+import com.shortsb.embedding.exception.EmbeddingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -18,6 +19,13 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
+    // 임베딩 연결 오류의 안전한 코드·상태 반환
+    @ExceptionHandler(EmbeddingException.class)
+    public ResponseEntity<ApiError> handleEmbedding(EmbeddingException exception) {
+        return ResponseEntity.status(exception.status())
+                .body(new ApiError(exception.code(), exception.getMessage()));
+    }
 
     // MVC 오류 상태별 공통 코드와 메시지 매핑
     @Override

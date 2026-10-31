@@ -11,15 +11,16 @@
 | API 문서 | springdoc OpenAPI UI 3.2.0 |
 | 연동 클라이언트 | React |
 
-`com.shortsb` 아래에 R1의 `auth`·`user`·`common` 구현이 있다. 사용자가 R1 전체 검증 완료를 보고하여 인증 단계를 완료 처리했다. 개별 실행 로그는 별도 수집하지 않았으며 Codex는 빌드·테스트를 실행하지 않았다. 현재 R2 상세계획을 작성했으며 콘텐츠·독서·추천 API는 아직 구현 전이다.
+`com.shortsb` 아래에 R1의 `auth`·`user`·`common` 구현과 R2의 `embedding` 내부 연결 서비스가 있다. 사용자가 R1 전체 검증 완료를 보고하여 인증 단계를 완료 처리했다. 개별 실행 로그는 별도 수집하지 않았으며 Codex는 Spring 빌드·테스트를 실행하지 않았다. 콘텐츠·독서·추천 업무 API는 아직 구현 전이다.
 
-상위 `ShortsB-AI`에는 KURE-v1 공통 encoder·FastAPI health/embeddings·JSONL 사전 생성 도구를 작성했다. 모델 없는 Python/HTTP 계약 검사 10개는 통과했으며, 이는 Spring 빌드·테스트 실행과 별개다. 사용자 GPU의 합성 문장 임베딩은 확인했지만 새 앱의 GPU 기동·Spring 연동·실제 데이터 처리는 미검증이다.
+상위 `ShortsB-AI`에는 KURE-v1 공통 encoder·FastAPI health/embeddings·도서 준비·JSONL 사전 생성·산출물 검증 도구를 작성했다. 합성 encoder를 사용한 Python/HTTP 검사 20개는 통과했으며, 이는 Spring 빌드·테스트 실행과 별개다. 15개 작품·864페이지 입력 검증을 마쳤다. 사용자 GPU의 합성 문장 임베딩은 확인했지만 새 앱의 GPU 기동·실제 도서 임베딩·Spring 통합은 미검증이다.
 
 ## 구현 구조안
 
 - Spring 업무 애플리케이션과 FastAPI 임베딩 프로세스로 역할을 분리한다. 사전 벡터 생성은 같은 encoder를 사용하는 Python 스크립트로 수행한다. FastAPI 최소 코드는 별도 ShortsB-AI에 작성했고 실제 서버 기동·연동 확인은 남아 있다.
 - 도메인별 `auth`, `user`, `book`, `reading`, `recommendation` 패키지를 둔다.
 - 도메인 내부를 역할별 하위 패키지로 나눈다. 현재 `auth`는 `config`, `controller`, `dto`, `security`, `service/impl`, `user`는 `controller`, `dto`, `entity`, `repository`, `service/impl`, `common`은 `config`, `dto`, `exception`으로 구성한다.
+- `embedding`은 `config`, `dto`, `exception`, `service/impl` 구조다. EmbeddingServiceImpl이 전용 RestClient로 FastAPI만 호출한다. 프런트용 컨트롤러·사용자 세션 전달·DB 직접 접근은 없다.
 - 요청 흐름: Controller → Service 인터페이스 → ServiceImpl → Repository → PostgreSQL. `UserServiceImpl`은 회원 조회·생성을, `GoogleOidcUserServiceImpl`은 검증된 구글 사용자와 내부 회원의 연결을 담당한다. Controller·인증 설정은 서비스 인터페이스를 주입받는다.
 - 응답 DTO는 `dto` 패키지에 두며 회원 응답 변환은 `MeResponse.from(User)`에서 처리한다. 외부 도서 API 호출은 연동 코드로 분리한다.
 - 입력 검증·인증은 요청 경계에서, 업무 검증과 트랜잭션은 Service에서 처리한다.
@@ -67,6 +68,14 @@
 - CSV는 속성·후보 기준이다. 대비 축은 결·시선·어조·태도·결말·시대·배경 6개며, 결은 전체 정서적 질감으로 어조·결말과 구분한다. 기준/대상 작품·축별 관계를 구분하고 pending/approved/rejected 상태로 관리한다. 후보 1~3을 추천 점수로 변환하지 않는다. 첫 실제 발췌 범위와 양쪽 근거·승인 상태를 확인한 뒤 대비를 제공한다.
 - 모델·GPU 연결·가중치·벡터 저장은 후속 논의한다. 별도 벡터 DB를 필수 전제로 추가하지 않는다. 인터페이스 제안은 plans/fastapi-ai-handoff.md를 따른다.
 - 환경변수·접속·자격 증명이 필요하면 해당 구현 전에 이름과 용도를 안내한다. Spring의 Google/DB 비밀값을 FastAPI로 전달하지 않는다.
+
+## Spring 임베딩 연결 설정
+
+- APP_EMBEDDING_BASE_URL 기본값은 로컬 SSH forwarding용 http://127.0.0.1:18001이다. 실제 연결 시 환경에 맞게 지정한다. APP_EMBEDDING_API_KEY가 있으면 X-API-Key로 전송한다.
+- APP_EMBEDDING_CONNECT_TIMEOUT·APP_EMBEDDING_READ_TIMEOUT의 기본값은 2s·30s다. JDK HTTP 클라이언트를 사용하고 리다이렉트를 따라가지 않는다. 앱 시작 시 모델 상태를 조회하지 않으며 서비스 코드에서 자동 재시도하지 않는다.
+- 사전 manifest에서 가져온 modelId·고정 revision·fingerprint·dimension·normalized를 기대 모델로 전달한다. 응답이 GPU 준비 상태인지, 단건 query ID·역할·벡터 길이·유한 값·L2 정규화가 맞는지 확인한다. 모델 설정 불일치 벡터는 반환하지 않는다.
+- 연결 오류·처리 중·GPU/모델 불일치는 503, 잘못된 응답은 502, 입력 오류는 400으로 안전한 code/message를 반환한다. 외부 오류 본문·키·프롬프트를 로그나 응답으로 전달하지 않는다.
+- 계약 검사 7개는 사용자 실행용으로 작성했으며 Codex는 실행하지 않았다. 실제 추천 API·벡터 DB 반영·서버 통합은 후속 작업이다.
 
 ## 스키마와 계약 영향
 
