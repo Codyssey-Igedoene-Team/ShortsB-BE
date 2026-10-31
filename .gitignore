@@ -42,3 +42,6 @@ AGENTS.md
 ## DB 파일 허용
 docs/*
 !docs/database/
+!docs/product-specs/
+!docs/Arch.md
+!docs/gitRule.md
