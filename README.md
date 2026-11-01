@@ -4,7 +4,7 @@
 
 이 저장소는 Google 로그인, 도서·페이지 조회, 추천 계산, 대비 근거 검증, 전체 독서 기록과 PostgreSQL 데이터 등록을 담당합니다. 임베딩 모델 실행과 사전 벡터 생성은 별도 `ShortsB-AI` 프로젝트가 담당합니다.
 
-> 현재 시연 준비는 프론트·Spring·PostgreSQL·FastAPI를 로컬에서 실행하는 방향입니다. 로컬 CPU 실행을 허용하도록 백엔드 검증을 변경한 상태는 아닙니다. AI 실행 조건은 아래 내용을 확인하세요.
+> 현재 확인한 실행 구성은 로컬 프론트·Spring·PostgreSQL과 제공 GPU 서버의 FastAPI입니다. VPN·PuTTY SSH 터널로 노트북의 `127.0.0.1:18001`을 GPU 서버의 `127.0.0.1:8001`에 연결합니다. 인증정보는 실행 환경에 주입하며 `.env.example`에는 실제 값을 넣지 않습니다.
 
 ## 주요 기능
 
@@ -109,7 +109,7 @@ scripts/              # 대비 후보 검토 양식 생성 도구
 
 ## 로컬 실행
 
-아래 명령은 개발자가 실행할 때 참고하는 절차입니다. README 작성 과정에서 빌드·테스트·DB 적용·서버 실행을 수행한 결과가 아닙니다.
+아래 절차는 새로운 실행 환경을 준비하는 방법입니다. 기존 시연 환경은 사용자가 직접 실행해 확인했습니다. README 수정 과정에서 Codex가 Spring 빌드·테스트·DB 적용·git을 실행한 것은 아닙니다.
 
 ### 1. 준비 사항
 
@@ -117,7 +117,7 @@ scripts/              # 대비 후보 검토 양식 생성 도구
 - 실행 중인 PostgreSQL과 사용할 DB·접속 계정
 - Google 웹 애플리케이션 OAuth 클라이언트 ID·비밀값
 - 프론트의 실제 로컬 주소
-- 프롬프트 추천을 확인할 경우 실행 가능한 `ShortsB-AI` 환경과 호환되는 사전 벡터
+- 프롬프트 추천을 확인할 경우 실행 중인 GPU 서버의 `ShortsB-AI`, VPN·SSH 터널 및 서버와 같은 설정으로 생성한 사전 벡터
 
 예시 작업 폴더는 다음과 같습니다. 프론트 위치와 실행 포트는 해당 프로젝트 설정을 따릅니다.
 
@@ -147,7 +147,7 @@ psql -h localhost -p 5432 -U shortsb -d shortsb -v ON_ERROR_STOP=1 -f docs/datab
 
 `.env.example`은 변수 목록과 설명입니다. **Spring은 `.env` 파일을 자동으로 읽지 않습니다.** IntelliJ 실행 설정이나 실제 실행 셸의 환경변수로 주입해야 합니다.
 
-다음 값은 프론트를 `http://localhost:3000`에서 실행한다고 가정한 예시입니다. 프론트 주소가 다르면 로그인 이동 주소와 허용 출처를 함께 바꿉니다.
+다음 값은 프론트를 `http://localhost:5173`에서 실행한다고 가정한 예시입니다. 프론트 주소가 다르면 로그인 이동 주소와 허용 출처를 함께 바꿉니다.
 
 ```dotenv
 SPRING_PROFILES_ACTIVE=local
@@ -159,11 +159,11 @@ GOOGLE_CLIENT_ID=발급받은_클라이언트_ID
 GOOGLE_CLIENT_SECRET=발급받은_클라이언트_비밀값
 GOOGLE_REDIRECT_URI=http://localhost:8080/login/oauth2/code/google
 
-APP_LOGIN_SUCCESS_URL=http://localhost:3000/
-APP_LOGIN_FAILURE_URL=http://localhost:3000/?login=failed
-APP_CORS_ALLOWED_ORIGINS=http://localhost:3000
+APP_LOGIN_SUCCESS_URL=http://localhost:5173/
+APP_LOGIN_FAILURE_URL=http://localhost:5173/?login=failed
+APP_CORS_ALLOWED_ORIGINS=http://localhost:5173
 
-APP_EMBEDDING_BASE_URL=http://127.0.0.1:8001
+APP_EMBEDDING_BASE_URL=http://127.0.0.1:18001
 ```
 
 이 블록은 그대로 자동 로딩되는 설정 파일이 아닙니다. 실제 값으로 바꿔 실행 환경에 등록하고, 비밀값은 공유 문서나 소스에 기록하지 않습니다. CORS 출처에는 경로나 마지막 `/`를 넣지 않습니다.
@@ -180,7 +180,7 @@ APP_EMBEDDING_BASE_URL=http://127.0.0.1:8001
 | `APP_EMBEDDING_READ_TIMEOUT` | 기본 `30s` |
 | `APP_RECOMMENDATION_PROMPT_WEIGHT` | 기본 `0.6` |
 
-`APP_EMBEDDING_BASE_URL`의 코드 기본값은 SSH 포워딩용 `http://127.0.0.1:18001`입니다. FastAPI를 같은 PC의 `8001`에서 실행한다면 위 예시처럼 주소를 명시합니다.
+`APP_EMBEDDING_BASE_URL`의 코드 기본값도 SSH 포워딩용 `http://127.0.0.1:18001`입니다. 별도로 FastAPI를 같은 PC의 `8001`에서 실행한다면 `http://127.0.0.1:8001`로 변경합니다. 실제 인증정보가 포함된 환경 파일은 커밋하지 않습니다.
 
 ### 4. Google 로그인 설정
 
@@ -224,7 +224,24 @@ Swagger는 `local` 프로필에서만 공개합니다. `prod`·프로필 미지�
 
 ## 도서·임베딩 데이터 준비
 
-현재 준비된 입력은 15개 작품·864페이지입니다. 이는 실제 GPU 벡터 생성·DB 반영·작품 이용 권한 승인이 완료됐다는 뜻은 아닙니다.
+사용자가 15개 작품·864페이지, GPU 생성 본문 벡터 864개·카드 벡터 3개 및 활성 추천 설정 1건의 로컬 DB 등록을 확인했습니다. 새로운 DB에는 아래 절차로 데이터를 준비해야 합니다. 구절/해시 검증과 작품의 공개 이용 조건 검토는 별개입니다.
+
+### 입력 자료 확보
+
+원본 자료·카탈로그·벡터는 일부 `.gitignore` 제외 대상입니다. GitHub 소스만 내려받았다고 데이터가 함께 준비되는 것은 아닙니다. 임베딩 산출물은 아래 링크에서 내려받고 제공된 파일을 다음 위치에 배치합니다. 묶음에 없는 원본·카탈로그는 별도로 준비해야 합니다. 인증정보나 개인 DB 덤프를 자료 묶음에 포함하지 않습니다.
+
+- [임베딩 산출물 다운로드 — Google Drive](https://drive.google.com/file/d/1CGvm3BOziZGNqz-rcfsDLtORNrPosMtI/view?usp=sharing)
+
+| 자료 | 배치 위치 | 용도 |
+| --- | --- | --- |
+| 책 원본 `books.json` | `ShortsB-BE/docs/shortB-15books-texts/books.json` | 카탈로그를 처음부터 만드는 경우 |
+| 카탈로그 3개 파일 | `ShortsB-AI/data/catalog-v1/` | `catalog-metadata.json`, `segments.jsonl`, `manifest.json` |
+| 본문 벡터·manifest | `ShortsB-AI/outputs/documents-v1/` | GPU 사전 생성 결과 |
+| 카드 벡터·manifest | `ShortsB-AI/outputs/cards-v1/` | GPU 사전 생성 결과 |
+
+카탈로그 묶음을 받았다면 원본 변환을 다시 수행할 필요가 없습니다. 벡터 묶음을 받았다면 모델 설정을 확인하고 등록하며, 없으면 AI README의 고정 환경에서 사전 생성합니다. 경로는 위 형제 프로젝트 배치를 기준으로 합니다.
+
+### 검증·등록
 
 1. `ShortsB-AI`의 준비 도구로 도서 메타데이터·페이지 입력·manifest 묶음을 준비합니다.
 2. 같은 AI 환경에서 본문 864개와 카드 3종의 벡터를 생성하고 산출물을 검증합니다.
@@ -258,19 +275,40 @@ Swagger는 `local` 프로필에서만 공개합니다. `prod`·프로필 미지�
 - 동일 데이터는 재사용하고, 기존 값과 다른 데이터는 자동으로 덮어쓰지 않습니다.
 - CSV 대비 후보는 검토 대기 자료입니다. 후보 등록만으로 대비가 제공되지 않습니다.
 
+대비 시연용으로 `docs/database/contrast-seed.sql`에 45개 방향성 관계의 구절·설명이 준비되어 있습니다. 도서의 승인 상태를 먼저 준비한 뒤 내용을 확인하고 pgAdmin에서 전체 실행합니다. SQL은 본문 해시·페이지·정확한 구절을 확인하고, 기존 승인/제외 관계를 보존합니다. 사용자는 이 SQL의 로컬 DB 적용 성공을 보고했습니다. 이는 로컬 시연용 AI 보조 검토이며 사람의 전체 본문 검수·공개 이용 조건 검토 완료를 뜻하지 않습니다. 실제 첫 발췌에 해당 근거 페이지가 없으면 대비 결과가 없을 수 있습니다.
+
 상세 절차는 [도서·벡터 등록 안내](docs/database/content-import.md)와 [대비 검수 등록 안내](docs/database/contrast-import.md)를 참고합니다.
 
-## 로컬 AI 실행 조건
+## GPU 서버 AI 연결
 
 AI 실행·사전 생성 명령은 [ShortsB-AI README](../ShortsB-AI/README.md)를 따릅니다. 해당 링크는 두 프로젝트가 같은 상위 폴더에 있을 때의 로컬 경로입니다.
 
-- 모델은 `nlpai-lab/KURE-v1`이며 `EMBEDDING_MODEL_REVISION`에 고정된 40자리 commit SHA가 필요합니다.
+- 확인한 모델은 `nlpai-lab/KURE-v1`, 고정 revision은 `8b418a58414668e75532ed045c22d9ca018ae2b2`입니다. 모델 revision은 공개 모델 버전이며 인증키가 아닙니다.
 - 사전 벡터와 온라인 응답의 모델 ID·revision·설정 fingerprint·차원·정규화가 일치해야 합니다. fingerprint에는 주요 라이브러리 버전도 포함됩니다.
 - FastAPI는 기본 CUDA 실행이며 GPU를 사용할 수 없으면 기동에 실패합니다. `EMBEDDING_DEVICE=cpu`를 명시하면 AI 프로세스 자체의 CPU 진단은 가능합니다.
 - **현재 Spring은 CPU 임베딩 응답을 `503 / EMBEDDING_GPU_REQUIRED`로 거절합니다. 사전 벡터 등록도 GPU 생성 메타데이터를 요구합니다. CPU 설정만으로 전체 AI 연동을 실행할 수 있다고 가정하지 않습니다.**
-- 로컬 CUDA GPU가 없는 환경에서 전체 AI 시연을 하려면 별도 실행 정책 변경과 검증이 필요하며, 이 README 작성으로 해당 변경을 적용하지는 않습니다.
+- 노트북에 CUDA GPU가 없어도 GPU 서버로 터널 연결하면 전체 AI 연동이 가능합니다. 서버·VPN 접속 자격은 별도로 필요합니다. 로컬 CPU 전환은 이번 실행 경로에 포함하지 않습니다.
 - FastAPI는 Uvicorn worker 1개로 모델을 재사용합니다. 사전 생성과 온라인 서버를 동시에 띄워 모델을 중복 점유하지 않도록 합니다.
 - Spring은 기동 시 FastAPI를 자동 호출하지 않습니다. Spring 기동 성공과 실제 프롬프트 추천 성공을 구분합니다.
+
+GPU 서버에서 AI README의 가상환경·환경변수 설정 후 실행합니다.
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 8001 --workers 1
+```
+
+VPN 연결 후 PuTTY로 **GPU 서버**에 SSH 접속합니다. 실행 중인 PuTTY의 `Change Settings → Connection → SSH → Tunnels`에서 다음 값을 추가하고 `Apply`를 누릅니다. 이미 있으면 중복 추가하지 않습니다.
+
+| 항목 | 값 |
+| --- | --- |
+| Source port | `18001` |
+| Destination | `127.0.0.1:8001` |
+| 종류 | `Local`, `Auto` |
+| 다른 호스트의 로컬 포트 접속 허용 | 체크하지 않음 |
+
+노트북 브라우저에서 `http://127.0.0.1:18001/health`를 열어 `gpuReady: true`를 확인합니다. 현재 서버 fingerprint는 `521e40a63c92f2444806079d8e51436cdee38b8fac6e87309e5b77d706e7206d`이며 DB 활성 모델과 일치해야 합니다. 실행 환경이 달라졌다면 DB의 fingerprint 문자열만 바꾸지 말고 모델/라이브러리를 맞추거나 벡터를 다시 생성합니다.
+
+VPN과 PuTTY 연결을 유지하고 Spring을 실행합니다. PuTTY 재접속 후에는 터널 설정도 확인합니다. 서버에서 `address already in use`가 나오면 기존 프로세스를 임의 종료하지 말고 `curl -s http://127.0.0.1:8001/health`로 기존 FastAPI 상태를 확인합니다. 임베딩 생성·DB 등록은 접속할 때마다 다시 수행하지 않습니다.
 
 도서·권한 데이터가 있으면 `ANY` 단독 추천과 전체 독서는 온라인 FastAPI 호출 없이 동작하는 경로입니다. 카드 추천에는 저장된 벡터, 프롬프트 추천에는 저장된 벡터와 온라인 임베딩 연결이 필요합니다.
 
@@ -339,17 +377,18 @@ DB·환경변수 준비 → Spring 기동 → Google 로그인 → 내 정보·C
 
 ## 구현·검증 상태
 
-다음은 저장소 문서와 현재 코드에서 확인한 상태입니다. 기능 코드 작성과 실제 통합 검증 완료를 구분합니다.
+다음은 2026-11-01 사용자의 수동 실행 결과 보고를 반영한 상태입니다. 개별 성공 사례와 전체 경계 조건·프런트 통합 완료를 구분합니다.
 
 | 영역 | 상태 |
 | --- | --- |
 | 인증 기반 | 사용자의 R1 검증 완료 보고가 문서에 기록됨 |
-| 첫 추천·발췌·도서 API | 코드 작성, 실제 DB·벡터·API 통합 검증 대기 |
-| 전체 독서 API | 코드·SQL 작성, 실제 DB·API 검증 대기 |
-| 대비 추천 | 코드·SQL·검수 양식 작성, 실제 근거 승인·등록·API 검증 대기 |
+| 첫 추천 | 실제 GPU 프롬프트 임베딩과 DB 벡터를 사용하는 Swagger 추천 성공 보고 |
+| 전체 독서 API | 시작·페이지 조회·위치 저장·중단·이어 읽기 성공 보고. 완료 처리·충돌 경계 조건은 별도 확인 필요 |
+| 대비 추천 | 백야 1~3쪽 → B사감과 러브레터 대비 응답 성공 및 45개 후보 SQL 적용 성공 보고. 나머지 관계 전체의 API 응답은 미확인 |
 | AI 입력 준비 | 15개 작품·864페이지의 구조·해시·매핑 검증과 입력 준비 기록 있음 |
-| 실제 전체 임베딩·DB 등록 | 확인 완료로 기록되지 않음 |
-| 로컬 전체 시연 | 로컬 실행 방향으로 전환, 실행 장치와 통합 결과 확인 필요 |
+| 실제 전체 임베딩·DB 등록 | L4에서 본문 864개·카드 3개 생성/파일 검증 및 로컬 DB 등록 성공 보고 |
+| 실행 구성 | 로컬 Spring·DB와 GPU 서버 FastAPI를 VPN·PuTTY 터널로 연결해 확인 |
+| 프런트 전체 시연 | 별도 통합 확인 필요 |
 
 기본 공유·공유 카드, 신규 모델 학습, 실시간 외부 도서 수집, 자동 번역, 생성형 추천 설명은 현재 필수 구현 범위에 포함하지 않습니다.
 

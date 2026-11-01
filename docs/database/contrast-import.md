@@ -1,6 +1,37 @@
 # 대비 후보·검수 근거 등록
 
-상태: 양식 생성·등록 코드·대비 API 작성. CSV 양식 생성만 실행했고 Spring 빌드·테스트·DB 적용·검수 등록·API 실행은 하지 않았다. 실제 근거 검수·승인은 미완료다.
+상태: 사용자가 GPU 사전 임베딩·로컬 DB 등록·첫 추천·전체 독서 시작/저장/재개·백야 → B사감과 러브레터 대비 응답 성공을 보고했다. CSV 45개 후보의 로컬 시연용 SQL을 추가했다. 추가 SQL의 DB 반영·나머지 대비 응답·프런트 통합은 미확인이다. Codex는 Spring 빌드·테스트·DB 적용·git을 실행하지 않았다.
+
+## 로컬 시연용 45개 관계 SQL
+
+사용자가 후보별 짧은 본문 구절 확인과 SQL 파일 생성을 승인하여 [contrast-seed.sql](contrast-seed.sql)을 작성했다. 전체 본문은 출력하지 않았다. 제공된 45개 방향성 후보·6개 축을 유지하고, 각 구절에 맞게 연결 주제와 설명을 작성했다. CSV 주제를 양쪽에서 입증된 주제로 그대로 복사하지 않았다. 결말 대비는 마지막 페이지 구절을 사용했다.
+
+- 새 API 키·DB 환경변수는 필요 없다. 기존 로컬 `shortsb` DB의 pgAdmin Query Tool에서 SQL **전체를 선택해 실행**한다. 기존 스키마/003 및 도서 등록이 선행되어야 한다.
+- 실행은 AI가 작성한 구절·설명에 대한 사용자의 **로컬 시연 승인**이다. `reviewed_by`는 `local-demo-user:AI-assisted`로 기록한다. 사람의 전체 본문 검수나 공개 이용 조건 검토가 완료됐다는 뜻은 아니다.
+- DB 숫자 ID를 고정하지 않고 작품 외부 ID로 연결한다. 각 작품의 예상 전체 본문 해시·현재 권한 승인·실제 페이지·정확한 구절 포함을 확인한다. 하나라도 불일치하면 전체 반영을 중단한다. 실패한 트랜잭션은 `ROLLBACK;`으로 종료하고 원인을 확인한다.
+- 구절 안의 줄바꿈은 `E'…\n…'` 형식으로 고정해 Windows의 SQL 파일 CRLF 변환과 구분한다. 불일치 시 오류 DETAIL에 작품 외부 ID·축·실패 항목을 표시하고 본문은 출력하지 않는다. 오류 후 재실행할 때는 `ROLLBACK;`을 먼저 실행하고 수정된 파일을 새로 열어 전체를 실행한다.
+- 후보·페이지 처리는 준비 도구와 동일한 등록 잠금으로 보호한다. 새 관계는 승인 상태로 추가하고 기존 `pending`은 갱신한다. 기존 `approved`/`rejected`는 내용·페이지·검수자를 보존한다. 앞서 등록한 백야 → B사감 관계도 유지한다.
+- 기존 승인 1건 외에 다른 관계가 없다면 44건 추가·후보 범위의 승인 총 45건을 예상한다. 모두 승인 상태라면 작품마다 나가는 관계 3건이다. 기존 제외 관계가 있으면 승인 수는 더 적으며 SQL의 상태별 집계로 드러난다. 재실행 시 이미 승인된 관계는 변경하지 않는다.
+- 양쪽 근거를 한 페이지씩 지정해 요청 1~10쪽에 담을 수 있게 했다. 실제 첫 발췌에 기준 근거 페이지가 포함되어야 한다. 작품별 3개 관계가 모든 페이지·프롬프트를 지원한다는 뜻은 아니다.
+- 현재 스키마는 `(기준 작품, 대상 작품, 축)`당 한 행이다. 동일 쌍/축의 여러 구간을 동시에 추가하는 확대는 별도 스키마·등록 계약 변경이 필요하다. 이번 작업에서는 변경하지 않았다.
+
+SQL은 처리한 행 수·후보 범위 상태별 수·실제 근거 페이지와 본문 버전 일치 여부를 출력한다. 등록 후 전체 상태는 다음처럼 확인한다. 다른 기존 관계가 있다면 전체 집계는 45건보다 클 수 있다.
+
+```sql
+SELECT review_status, count(*) AS relation_count
+FROM public.book_contrast_relations
+GROUP BY review_status;
+
+SELECT s.title AS source_title, t.title AS target_title, r.axis,
+       r.source_start_page_no, r.target_start_page_no
+FROM public.book_contrast_relations r
+JOIN public.books s ON s.id = r.source_book_id
+JOIN public.books t ON t.id = r.target_book_id
+WHERE r.review_status = 'approved'
+ORDER BY s.title, t.title;
+```
+
+같은 로그인 세션의 유효한 `previewId`로 대비 API를 재호출하면 즉시 반영된다. 스프링 재시작은 필요 없다. 발췌에 해당 근거가 없으면 계속 `available=false`일 수 있다. 사용자 확인이 끝난 백야 1~3쪽은 백야 3쪽 → B사감 1쪽 관계로 계속 확인할 수 있다.
 
 ## 저장과 준비
 
