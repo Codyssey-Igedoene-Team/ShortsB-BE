@@ -36,6 +36,11 @@ out/
 ### VS Code ###
 .vscode/
 
+### 로컬 환경변수 ###
+.env
+.env.*
+!.env.example
+
 ## AI
 AGENTS.md
 

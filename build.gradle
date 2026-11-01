@@ -8,6 +8,10 @@ group = 'com.shortsb'
 version = '0.0.1-SNAPSHOT'
 description = 'ShortsB-BE'
 
+springBoot {
+    mainClass = 'com.shortsb.ShortsBBeApplication'
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -22,6 +26,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-restclient'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-client'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.2.0'
@@ -31,6 +36,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-restclient-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+    testImplementation 'org.springframework.security:spring-security-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
     testCompileOnly 'org.projectlombok:lombok'
@@ -40,4 +46,26 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+// 웹 서버 자동 시작과 분리한 수동 도서 검증·등록 명령
+tasks.register('importCatalog', JavaExec) {
+    group = 'application'
+    description = '도서·페이지·사전 벡터 검증 또는 명시적 DB 등록'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.shortsb.book.command.CatalogImportCommand'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// 사람 검수 자료의 DB 대조 또는 명시적 반영
+tasks.register('importContrasts', JavaExec) {
+    group = 'application'
+    description = '대비 근거 검수 파일 대조·등록'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.shortsb.recommendation.command.ContrastImportCommand'
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
 }
